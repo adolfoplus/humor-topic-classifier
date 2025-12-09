@@ -113,11 +113,11 @@ if uploaded_file:
                     topic = "desconocido"
                     score = 0.0
 
-                # 🎭 CHISTE ESPAÑOL — Nuevo prompt 🔥
+                # 🎭 CHISTE ESPAÑOL — Prompt Corregido 🔥
                 prompt = (
-                    f"Genera un chiste en español muy corto y gracioso "
-                    f"sobre el tema: {topic}.\n"
-                    f"Chiste:"
+                    "Instrucción: Escribe un chiste muy corto, divertido y en español.\n"
+                    f"Entrada: {topic}.\n"
+                    "Salida:"
                 )
                 joke = humor_model(prompt, max_length=60)[0]["generated_text"].strip()
 
