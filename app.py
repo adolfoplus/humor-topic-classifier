@@ -54,11 +54,12 @@ def load_models():
         "zero-shot-classification",
         model="valhalla/distilbart-mnli-12-1"
     )
-    humor = pipeline(
+    humor_model = pipeline(
         "text2text-generation",
         model="google/flan-t5-base"
     )
-    return classifier, humor
+    return classifier, humor_model
+
 
 classifier, humor_model = load_models()
 st.success("🤖 Modelos cargados correctamente.")
@@ -69,45 +70,61 @@ TOPICS = [
     "animales", "famosos"
 ]
 
+
 # ======================
-# PROCESAMIENTO
+# FILE UPLOAD
 # ======================
-uploaded_file = st.file_uploader("📂 Subir archivo SemEval (CSV / TSV)", type=["csv","tsv"])
+uploaded_file = st.file_uploader("📂 Subir archivo SemEval Task A (CSV / TSV)", type=["csv", "tsv"])
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file, sep="\t" if uploaded_file.name.endswith(".tsv") else ",")
+    # Leer CSV o TSV
+    if uploaded_file.name.endswith(".tsv"):
+        df = pd.read_csv(uploaded_file, sep="\t")
+    else:
+        df = pd.read_csv(uploaded_file)
+
+    st.subheader("🧪 Vista previa")
     st.dataframe(df.head())
-    text_col = "headline" if "headline" in df.columns else df.columns[-1]
+
+    # Detectar columna de texto
+    text_col = None
+    for c in ["headline", "text", "sentence"]:
+        if c in df.columns:
+            text_col = c
+            break
+    if text_col is None:
+        text_col = df.columns[-1]
 
     total = len(df)
     st.write(f"📦 Total de registros: **{total}**")
     st.write("---")
 
-    if st.button("🚀 Procesar por lotes de 10"):
-        BATCH_SIZE = 10
+    if st.button("🚀 Procesar por lotes (10 en 10)"):
+        BATCH = 10
         results = []
         progress = st.progress(0)
-        status = st.empty()
+        info = st.empty()
 
-        for start in range(0, total, BATCH_SIZE):
-            end = min(start + BATCH_SIZE, total)
+        for start in range(0, total, BATCH):
+            end = min(start + BATCH, total)
             batch = df.iloc[start:end]
 
-            st.warning(f"🔍 Analizando filas {start+1} a {end}…")
+            st.warning(f"🔍 Analizando filas {start+1} → {end} de {total}…")
 
-            # Clasificación
-            batch_texts = batch[text_col].astype(str).tolist()
-            class_res = classifier(batch_texts, candidate_labels=TOPICS)
+            texts = batch[text_col].astype(str).tolist()
+
+            zsc = classifier(texts, candidate_labels=TOPICS)
 
             for i, row in enumerate(batch.itertuples()):
-                topic = class_res["labels"][i][0]
-                score = class_res["scores"][i][0]
+                topic = zsc["labels"][i][0]
+                score = float(zsc["scores"][i][0])
 
-                prompt = f"Escribe un chiste en español, corto y gracioso, sobre '{topic}'."
+                # CHISTE EN ESPAÑOL
+                prompt = f"Escribe un chiste muy corto y gracioso en español sobre '{topic}'."
                 joke = humor_model(prompt, max_length=60)[0]["generated_text"].strip()
 
                 results.append({
-                    "id": row[0],
+                    "id": getattr(row, "id", row.Index),
                     "text": getattr(row, text_col),
                     "topic": topic,
                     "score": score,
@@ -115,25 +132,28 @@ if uploaded_file:
                 })
 
                 progress.progress(len(results) / total)
-                status.text(f"Procesados {len(results)}/{total}")
+                info.text(f"Procesados {len(results)}/{total}")
 
-            # Descarga parcial
             partial_df = pd.DataFrame(results)
             st.download_button(
-                f"⬇️ Parcial {end}",
+                f"⬇️ Descargar parcial hasta {end}",
                 partial_df.to_csv(index=False).encode("utf-8"),
                 file_name=f"partial_{end}.csv",
                 mime="text/csv",
-                key=f"p{end}"
+                key=f"partial_{end}"
             )
 
         final_df = pd.DataFrame(results)
         st.success("🎯 Procesamiento completado")
         st.dataframe(final_df)
+
         st.download_button(
             "📥 Descargar resultados finales",
             final_df.to_csv(index=False).encode("utf-8"),
             file_name="humor_output.csv",
             mime="text/csv"
         )
+
         st.balloons()
+else:
+    st.info("Sube un archivo CSV/TSV para comenzar 🚀")
