@@ -1,8 +1,15 @@
+# ⚡ Streamlit UI
 streamlit==1.52.1
-transformers==4.57.3
-pandas==2.3.3
-sentencepiece==0.2.0
+
+# 🤖 IA para clasificación y generación
+transformers==4.37.2
 langdetect==1.0.9
+
+# 📦 Dependencias comunes
+pandas==2.3.3
+numpy==2.0.2
+torch==2.9.1      # ✔ compatible con Python 3.13
+
 
 
 
