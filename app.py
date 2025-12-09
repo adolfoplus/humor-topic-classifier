@@ -11,7 +11,7 @@ import re
 st.set_page_config(page_title="Humor Topic Classifier", layout="wide", page_icon="😂")
 
 # ==========================================
-# ✨ STYLES
+# 🎨 Estilos
 # ==========================================
 st.markdown("""
 <style>
@@ -23,18 +23,18 @@ footer, header {visibility: hidden;}
 st.markdown("<h1>😂 Humor Topic Classifier</h1>", unsafe_allow_html=True)
 
 # ==========================================
-# 📂 CARGA DE ARCHIVO
+# 📂 Upload
 # ==========================================
 uploaded_file = st.file_uploader("📂 Sube tu archivo CSV/TSV del Task-A", type=["csv","tsv"])
 
 if uploaded_file:
 
     df = pd.read_csv(uploaded_file, sep=None, engine="python")
-    st.subheader("📊 Vista previa de los datos")
+    st.subheader("📊 Vista previa")
     st.dataframe(df.head())
 
     # ==========================================
-    # 🔍 TEXTO USABLE
+    # 🔍 Extraer texto usable
     # ==========================================
     def build_text(row):
         if "headline" in df.columns and isinstance(row["headline"], str) and row["headline"] != "-":
@@ -45,10 +45,14 @@ if uploaded_file:
 
     df["text_clean"] = df.apply(build_text, axis=1)
 
+    texts = df["text_clean"].tolist()
+    total = len(texts)
+    batch_size = 16
+
     # ==========================================
-    # 🧠 MODELO ZERO-SHOT (TEMAS)
+    # 🧠 Zero-Shot BERT
     # ==========================================
-    st.subheader("🧠 Cargando modelo Zero-Shot BERT…")
+    st.subheader("🧠 Cargando modelo Zero-Shot...")
     classifier = pipeline(
         "zero-shot-classification",
         model="facebook/bart-large-mnli",
@@ -64,9 +68,9 @@ if uploaded_file:
     ]
 
     # ==========================================
-    # 🤣 GENERADOR DE CHISTES (GPT-2)
+    # 🤣 Generador de chistes GPT-2
     # ==========================================
-    st.subheader("🎭 Cargando generador de chistes…")
+    st.subheader("🎭 Cargando generador de chistes...")
     joke_gen = pipeline(
         "text-generation",
         model="gpt2",
@@ -81,73 +85,83 @@ if uploaded_file:
 
     def generate_joke(txt, topic):
         prompt = f"Write a short funny joke about {topic}: {txt}. Joke:"
-        out = joke_gen(prompt, max_length=60, temperature=0.95, num_return_sequences=1)
-        joke = out[0]["generated_text"].split("Joke:")[-1]
+        result = joke_gen(prompt, max_length=60, temperature=0.95, num_return_sequences=1)
+        joke = result[0]["generated_text"].split("Joke:")[-1].strip()
         return clean_joke(joke)
 
-    texts = df["text_clean"].tolist()
-    total = len(texts)
-    batch_size = 16  # más pequeño para ir más fluido
-
     topics, scores, jokes = [], [], []
-
     progress_bar = st.progress(0)
-    status = st.empty()
-    logs = st.container()
+    visual_box = st.empty()
+    output_file = "progress_partial.csv"
     start = time.time()
 
-    output_file = "progress_partial.csv"
-
     # ==========================================
-    # 🚀 CLASIFICAR + GENERAR CHISTES
+    # 🚀 Procesamiento batch con visual reactivo
     # ==========================================
-    st.subheader(f"🔄 Clasificando {total} textos y generando chistes…")
+    st.subheader(f"🔄 Procesando {total} textos y generando humor…")
 
     try:
         for i in range(0, total, batch_size):
             batch_texts = texts[i:i+batch_size]
 
-            # ---- clasificación de temas
+            # 🔵 Estado: Detectando tema
+            visual_box.markdown(
+                f"""
+                <div style="background:#1E293B; padding:18px; border-radius:10px;">
+                    <p style="color:#38BDF8;"><b>🔍 Analizando tema...</b></p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
             results = classifier(
                 batch_texts,
                 topics_list,
                 hypothesis_template="This is about {}."
             )
-
             for r in results:
                 topics.append(r["labels"][0])
                 scores.append(float(r["scores"][0]))
 
-            # ---- generación de chistes (uno por texto del batch)
+            # 🟡 Estado: Generando chiste
+            visual_box.markdown(
+                f"""
+                <div style="background:#1E293B; padding:18px; border-radius:10px;">
+                    <p style="color:#FACC15;"><b>✍️ Creando chiste...</b></p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
             for idx, txt in enumerate(batch_texts):
                 jokes.append(generate_joke(txt, topics[i+idx]))
 
-            # Guardar progreso parcial en el DataFrame
+            # Guardar progreso parcial
             df.loc[:len(topics)-1, "topic"] = topics
             df.loc[:len(scores)-1, "score"] = scores
             df.loc[:len(jokes)-1, "joke"] = jokes
-
             df.to_csv(output_file, index=False)
 
-            # Progreso
-            prog = (i + batch_size) / total
-            elapsed = time.time() - start
-            eta = (elapsed/prog) - elapsed if prog > 0 else 0
+            prog = min((i+batch_size)/total, 1.0)
 
-            progress_bar.progress(min(prog, 1.0))
-            status.info(f"✔ {min(i+batch_size,total)}/{total} • {prog*100:.1f}% • ⏱ {elapsed/60:.1f}m • ETA {eta/60:.1f}m")
-
-            with logs:
-                st.write(f"🟦 Batch procesado → filas hasta: {min(i+batch_size,total)}")
-
-        status.success("🎉 Clasificación y generación de chistes completadas")
+            # 🟢 Estado: Batch completado
+            visual_box.markdown(
+                f"""
+                <div style="background:#1E293B; padding:18px; border-radius:10px;">
+                    <p style="color:#4ADE80;"><b>✨ Batch completado</b></p>
+                    <p style="color:#CBD5E1;">Progreso: {prog*100:.1f}%</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            progress_bar.progress(prog)
 
     except Exception as e:
-        st.error(f"❌ Error: {e}")
-        st.warning("Se guardó el progreso parcial en progress_partial.csv")
+        st.error(f"❌ Error: {str(e)}")
+        st.warning("Progreso parcial guardado en progress_partial.csv")
 
     # ==========================================
-    # 📈 DISTRIBUCIÓN DE TEMAS
+    # 📈 Gráfico de temas
     # ==========================================
     st.subheader("📈 Distribución de temas")
     if "topic" in df.columns and df["topic"].notna().any():
@@ -159,52 +173,33 @@ if uploaded_file:
             ax=ax
         )
         st.pyplot(fig)
-    else:
-        st.info("Aún no hay temas suficientes para graficar.")
 
     # ==========================================
-    # 🎤 SECCIÓN E: “STAND-UP” POR TEMA
+    # 🎤 Stand-Up Mode
     # ==========================================
-    st.subheader("🎤 Stand-up por tema")
-
-    if "topic" in df.columns and "joke" in df.columns and df["topic"].notna().any():
+    st.subheader("🎤 Stand-Up por tema")
+    if "topic" in df.columns and "joke" in df.columns:
         available_topics = sorted(df["topic"].dropna().unique().tolist())
-        selected_topic = st.selectbox("Elige un tema para ver los chistes:", available_topics)
+        selected = st.selectbox("Elige un tema:", available_topics)
+        n = st.slider("¿Cuántos chistes?", 3, 50, 10)
 
-        n_show = st.slider("¿Cuántos chistes quieres ver?", min_value=3, max_value=50, value=10, step=1)
+        sample = df[df["topic"] == selected].sample(min(n, len(df[df["topic"] == selected])))
 
-        topic_df = df[(df["topic"] == selected_topic) & df["joke"].notna()]
-
-        if len(topic_df) == 0:
-            st.info("No hay chistes generados para este tema todavía.")
-        else:
-            # mezclar para que no siempre sean los mismos
-            topic_sample = topic_df.sample(min(n_show, len(topic_df)))
-
-            st.markdown(f"### 🎭 Chistes del tema: **{selected_topic}**")
-            for idx, row in topic_sample.iterrows():
-                original = row.get("text_clean", "")
-                joke = row.get("joke", "")
-                st.markdown(
-                    f"""
-                    <div style="border-radius:10px; padding:10px 15px; margin-bottom:8px; background-color:#1F2933;">
-                        <div style="color:#9CA3AF; font-size:12px; margin-bottom:4px;">
-                            📝 <b>Texto original:</b> {original}
-                        </div>
-                        <div style="color:#F9FAFB; font-size:14px;">
-                            😂 <b>Chiste:</b> {joke}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-    else:
-        st.info("Primero hay que terminar la clasificación y generación de chistes para ver esta sección.")
+        for _, row in sample.iterrows():
+            st.markdown(
+                f"""
+                <div style="background:#0f172a; border-radius:10px; padding:12px 15px; margin-bottom:8px;">
+                    <p style="color:#9CA3AF; font-size:12px;">📝 <b>Texto:</b> {row['text_clean']}</p>
+                    <p style="color:#F9FAFB; font-size:14px;">🤣 <b>Chiste:</b> {row['joke']}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
     # ==========================================
     # 📥 DESCARGA FINAL
     # ==========================================
-    st.subheader("📦 Descargar resultados finales")
+    st.subheader("📦 Descargar resultados")
     st.download_button(
         "📥 Descargar CSV con temas y chistes",
         df.to_csv(index=False).encode("utf-8"),
