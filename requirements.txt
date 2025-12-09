@@ -3,6 +3,9 @@ pandas
 langdetect
 sentence-transformers
 scikit-learn
+matplotlib
+
+
 
 
 
