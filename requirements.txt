@@ -1,8 +1,9 @@
 streamlit==1.32.0
 transformers==4.37.2
-torch==2.1.2
-sentencepiece==0.1.99
-lingua-language-detector==3.0.2
-pandas==2.2.0
-numpy==1.26.3
+torch==2.1.0
+pandas
+tqdm
+sentencepiece
+
+
 
