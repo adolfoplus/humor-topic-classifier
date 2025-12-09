@@ -101,9 +101,7 @@ if uploaded_file:
             zsc = classifier(texts, candidate_labels=TOPICS)
 
             for i, row in enumerate(batch.itertuples()):
-                # ===========================
-                # FIX SEGURO DEL TAMAÑO RESULTADO
-                # ===========================
+                # ZERO-SHOT seguro
                 try:
                     if isinstance(zsc, list):
                         topic = zsc[i]["labels"][0]
@@ -115,8 +113,12 @@ if uploaded_file:
                     topic = "desconocido"
                     score = 0.0
 
-                # CHISTE ESPAÑOL
-                prompt = f"Escribe un chiste muy corto y gracioso en español sobre '{topic}'."
+                # 🎭 CHISTE ESPAÑOL — Nuevo prompt 🔥
+                prompt = (
+                    f"Genera un chiste en español muy corto y gracioso "
+                    f"sobre el tema: {topic}.\n"
+                    f"Chiste:"
+                )
                 joke = humor_model(prompt, max_length=60)[0]["generated_text"].strip()
 
                 results.append({
