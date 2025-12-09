@@ -56,7 +56,7 @@ def load_models():
     )
     humor_model = pipeline(
         "text2text-generation",
-        model="google/flan-t5-base"
+        model="mrm8488/t5-small-spanish-jokes"  # 🔥 Modelo ligero de humor
     )
     return classifier, humor_model
 
@@ -103,23 +103,15 @@ if uploaded_file:
             for i, row in enumerate(batch.itertuples()):
                 # ZERO-SHOT seguro
                 try:
-                    if isinstance(zsc, list):
-                        topic = zsc[i]["labels"][0]
-                        score = float(zsc[i]["scores"][0])
-                    else:
-                        topic = zsc["labels"][i][0]
-                        score = float(zsc["scores"][i][0])
+                    topic = zsc[i]["labels"][0]
+                    score = float(zsc[i]["scores"][0])
                 except Exception:
                     topic = "desconocido"
                     score = 0.0
 
-                # 🎭 CHISTE ESPAÑOL — Prompt Corregido 🔥
-                prompt = (
-                    "Instrucción: Escribe un chiste muy corto, divertido y en español.\n"
-                    f"Entrada: {topic}.\n"
-                    "Salida:"
-                )
-                joke = humor_model(prompt, max_length=60)[0]["generated_text"].strip()
+                # 🎭 CHISTE ESPAÑOL
+                prompt = f"Cuento algo gracioso sobre {topic}:"
+                joke = humor_model(prompt, max_length=50)[0]["generated_text"].strip()
 
                 results.append({
                     "id": getattr(row, "id", row.Index),
