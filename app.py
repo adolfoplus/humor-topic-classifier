@@ -7,20 +7,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from transformers import pipeline
-import torch
 
-# ==========================================
+# =========================================================
 # CONFIGURACIÓN DE PÁGINA
-# ==========================================
+# =========================================================
 st.set_page_config(
     page_title="Humor Topic Classifier",
     page_icon="😂",
     layout="wide"
 )
 
-# ==========================================
-# ESTILOS
-# ==========================================
 st.markdown("""
 <style>
 h1 {
@@ -35,20 +31,18 @@ footer, header {visibility: hidden;}
 
 st.markdown("<h1>😂 Humor Topic Classifier</h1>", unsafe_allow_html=True)
 
-# ==========================================
+# =========================================================
 # PARÁMETROS GLOBALES
-# ==========================================
-# Forzamos CPU para evitar problemas de meta tensors
-DEVICE = -1
+# =========================================================
+DEVICE = -1  # forzamos CPU para evitar problemas de GPU/meta tensors
 
 TOPIC_LABELS = [
-    "politics","celebrities","technology","animals","food",
-    "sports","sex","crime","religion","health",
-    "work","money","education","family","environment",
-    "science","music","movies","internet","military"
+    "politics", "celebrities", "technology", "animals", "food",
+    "sports", "sex", "crime", "religion", "health",
+    "work", "money", "education", "family", "environment",
+    "science", "music", "movies", "internet", "military"
 ]
 
-# Estilos de humor por tema (mejor calidad de chistes)
 TOPIC_STYLES = {
     "politics":   "Make a clever political satire, a bit sarcastic but light",
     "celebrities":"Make a playful joke about celebrity culture",
@@ -72,10 +66,11 @@ TOPIC_STYLES = {
     "military":  "Make a light, respectful military joke"
 }
 
-# ==========================================
+# =========================================================
 # FUNCIONES AUXILIARES
-# ==========================================
+# =========================================================
 def build_text(row, df):
+    """Toma headline o word1+word2 y arma el texto a clasificar."""
     if "headline" in df.columns and isinstance(row.get("headline", ""), str) and row["headline"] != "-":
         return row["headline"].strip()
     if "word1" in df.columns and "word2" in df.columns:
@@ -98,9 +93,22 @@ def make_joke_prompt(text: str, topic: str) -> str:
     )
     return prompt
 
-# ==========================================
+def safe_score_to_float(s):
+    """Convierte el score de HF a float, tolerante a tensores."""
+    try:
+        if hasattr(s, "detach"):
+            s = s.detach()
+        if hasattr(s, "cpu"):
+            s = s.cpu()
+        if hasattr(s, "numpy"):
+            s = s.numpy()
+        return float(s)
+    except Exception:
+        return float(s.item()) if hasattr(s, "item") else float(s)
+
+# =========================================================
 # CARGA DE ARCHIVO
-# ==========================================
+# =========================================================
 uploaded_file = st.file_uploader("📂 Sube tu archivo CSV/TSV del Task-A", type=["csv", "tsv"])
 
 if uploaded_file:
@@ -110,14 +118,13 @@ if uploaded_file:
     st.subheader("📊 Vista previa")
     st.dataframe(df.head())
 
-    # Texto limpio base
     df["text_clean"] = df.apply(lambda r: build_text(r, df), axis=1)
     texts = df["text_clean"].tolist()
     total = len(texts)
 
-    # ======================================
-    # OPCIÓN: REANUDAR DE CSV PARCIAL
-    # ======================================
+    # ----------------------------------------------
+    # REANUDAR DESDE CSV PARCIAL (OPCIONAL)
+    # ----------------------------------------------
     resume = st.checkbox("🔁 Reanudar desde progress_partial.csv (si existe)")
 
     completed = 0
@@ -126,52 +133,45 @@ if uploaded_file:
     if resume and os.path.exists("progress_partial.csv"):
         try:
             prev = pd.read_csv("progress_partial.csv")
-            # Transferimos columnas que existan
             for col in ["topic", "score", "joke"]:
                 if col in prev.columns:
                     df[col] = prev[col]
             if "topic" in df.columns:
                 completed = int(df["topic"].notna().sum())
-            else:
-                completed = 0
-
             if completed > 0:
                 topics = df.loc[:completed-1, "topic"].tolist()
                 scores = df.loc[:completed-1, "score"].tolist() if "score" in df.columns else []
                 jokes  = df.loc[:completed-1, "joke"].tolist()  if "joke"  in df.columns else []
-
-            st.info(f"🔁 Reanudando desde fila {completed} (de {total})")
+            st.info(f"🔁 Reanudando desde fila {completed} de {total}")
         except Exception as e:
             st.warning(f"No se pudo reanudar: {e}")
             completed = 0
             topics, scores, jokes = [], [], []
 
-    # ==========================================
+    # =========================================================
     # MODELOS
-    # ==========================================
+    # =========================================================
     st.subheader("🧠 Cargando modelo Zero-Shot (rápido)…")
-    # Modelo más ligero que bart-large-mnli
     classifier = pipeline(
         "zero-shot-classification",
-        model="valhalla/distilbart-mnli-12-3",
+        model="valhalla/distilbart-mnli-12-1",  # ligero
         device=DEVICE
     )
     st.success("Modelo de temas cargado ✔")
 
     st.subheader("🎭 Cargando generador de chistes…")
-    # mantenemos gpt2 pero con mejores prompts
     joke_gen = pipeline(
         "text-generation",
         model="gpt2",
         pad_token_id=50256,
         device=DEVICE
     )
-    st.success("Generador listo 😂")
+    st.success("Generador de chistes listo 😂")
 
-    # ==========================================
-    # PROCESAMIENTO
-    # ==========================================
-    batch_size = 32  # algo mayor para hacer menos llamadas
+    # =========================================================
+    # PROCESAMIENTO PRINCIPAL
+    # =========================================================
+    batch_size = 32  # tamaño de batch para acelerar
     st.subheader(f"🔄 Procesando {total} textos y generando humor…")
 
     visual_box   = st.empty()
@@ -182,9 +182,9 @@ if uploaded_file:
     start_time = time.time()
 
     try:
-        for start in range(completed, total, batch_size):
-            end = min(start + batch_size, total)
-            batch_texts = texts[start:end]
+        for start_idx in range(completed, total, batch_size):
+            end_idx = min(start_idx + batch_size, total)
+            batch_texts = texts[start_idx:end_idx]
 
             # ---------- Estado: clasificando ----------
             frac = completed / total if total else 0.0
@@ -195,7 +195,7 @@ if uploaded_file:
                 f"""
                 <div style="background:#1E293B;padding:18px;border-radius:10px;">
                     <p style="color:#38BDF8;"><b>🔍 Analizando temas…</b></p>
-                    <p style="color:#94A3B8;">Textos {start+1} → {end}</p>
+                    <p style="color:#94A3B8;">Textos {start_idx+1} → {end_idx}</p>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -211,19 +211,7 @@ if uploaded_file:
             batch_scores = []
             for r in results:
                 batch_topics.append(r["labels"][0])
-                s = r["scores"][0]
-                # siempre lo forzamos a float, tolerante a tensores
-                try:
-                    if hasattr(s, "detach"):
-                        s = s.detach()
-                    if hasattr(s, "cpu"):
-                        s = s.cpu()
-                    if hasattr(s, "numpy"):
-                        s = s.numpy()
-                    s = float(s)
-                except Exception:
-                    s = float(s.item()) if hasattr(s, "item") else float(s)
-                batch_scores.append(s)
+                batch_scores.append(safe_score_to_float(r["scores"][0]))
 
             topics.extend(batch_topics)
             scores.extend(batch_scores)
@@ -232,8 +220,8 @@ if uploaded_file:
             visual_box.markdown(
                 f"""
                 <div style="background:#1E293B;padding:18px;border-radius:10px;">
-                    <p style="color:#FACC15;"><b>✍️ Creando chistes con mejor estilo…</b></p>
-                    <p style="color:#94A3B8;">Humor por tema (política, animales, internet, etc.)</p>
+                    <p style="color:#FACC15;"><b>✍️ Creando chistes por tema…</b></p>
+                    <p style="color:#94A3B8;">Humor especializado: política, animales, internet, etc.</p>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -257,12 +245,10 @@ if uploaded_file:
             # ---------- Actualizar progreso global ----------
             completed = len(topics)
 
-            # rellenar DataFrame
             df.loc[:completed-1, "topic"] = topics
             df.loc[:completed-1, "score"] = scores
             df.loc[:completed-1, "joke"]  = jokes
 
-            # guardar parcial
             df.to_csv(output_file, index=False)
 
             frac = completed / total if total else 1.0
@@ -288,9 +274,9 @@ if uploaded_file:
         st.error(f"❌ Error durante el procesamiento: {e}")
         st.warning("Progreso parcial guardado en progress_partial.csv")
 
-    # ==========================================
+    # =========================================================
     # GRÁFICO DE TEMAS
-    # ==========================================
+    # =========================================================
     st.subheader("📈 Distribución de temas")
     if "topic" in df.columns and df["topic"].notna().any():
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -304,9 +290,9 @@ if uploaded_file:
     else:
         st.info("Aún no hay suficientes temas para graficar.")
 
-    # ==========================================
-    # STAND-UP MODE
-    # ==========================================
+    # =========================================================
+    # STAND-UP MODE POR TEMA
+    # =========================================================
     st.subheader("🎤 Stand-Up por tema")
     if "topic" in df.columns and "joke" in df.columns and df["topic"].notna().any():
         temas = sorted(df["topic"].dropna().unique().tolist())
@@ -321,8 +307,10 @@ if uploaded_file:
             for _, row in sample.iterrows():
                 st.markdown(
                     f"""
-                    <div style="background:#0F172A;border-radius:10px;
-                                padding:12px 15px;margin-bottom:8px;">
+                    <div style="background:#0F172A;
+                                border-radius:10px;
+                                padding:12px 15px;
+                                margin-bottom:8px;">
                         <p style="color:#9CA3AF;font-size:12px;">
                             📝 <b>Texto:</b> {row['text_clean']}
                         </p>
@@ -334,9 +322,9 @@ if uploaded_file:
                     unsafe_allow_html=True
                 )
 
-    # ==========================================
+    # =========================================================
     # DESCARGA FINAL
-    # ==========================================
+    # =========================================================
     st.subheader("📦 Descargar resultados")
     st.download_button(
         "📥 Descargar CSV con temas y chistes",
