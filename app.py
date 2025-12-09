@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from langdetect import detect
 from transformers import pipeline
 
 # ======================
@@ -34,7 +33,6 @@ a {
 </style>
 """, unsafe_allow_html=True)
 
-
 # ======================
 # HEADER + CREDITOS
 # ======================
@@ -48,25 +46,27 @@ st.markdown("""
 ---
 """, unsafe_allow_html=True)
 
-
 # ======================
-# LOAD MODELS (CACHED)
+# MODELOS (CACHÉ)
 # ======================
 @st.cache_resource
 def load_models():
+    # Zero-shot más ligero que bart-large
     classifier = pipeline(
         "zero-shot-classification",
         model="valhalla/distilbart-mnli-12-1"
     )
+
+    # Modelo de texto en español (no requiere sentencepiece)
     humor_model = pipeline(
-        "text2text-generation",
-        model="google/flan-t5-base"
+        "text-generation",
+        model="flax-community/spanish-gpt2-small"
     )
     return classifier, humor_model
 
+st.info("Cargando modelos… esto puede tardar un poco la primera vez.")
 classifier, humor_model = load_models()
 st.success("🤖 Modelos cargados correctamente")
-
 
 TOPICS = [
     "política", "deportes", "tecnología", "salud",
@@ -74,6 +74,41 @@ TOPICS = [
     "animales", "famosos"
 ]
 
+# ======================
+# FUNCIONES AUXILIARES
+# ======================
+def detect_topic_batch(texts):
+    """
+    Corre zero-shot sobre una lista de textos.
+    Devuelve lista de (topic, score).
+    """
+    res = classifier(
+        texts,
+        candidate_labels=TOPICS,
+        hypothesis_template="Este texto es sobre {}."
+    )
+    topics = []
+    for r in res:
+        topics.append((r["labels"][0], float(r["scores"][0])))
+    return topics
+
+def generate_spanish_joke(topic, text):
+    """
+    Genera un chiste corto en español usando un GPT-2 entrenado en español.
+    """
+    prompt = (
+        f"Escribe un chiste corto y muy gracioso en español "
+        f"sobre el tema '{topic}'. Que sea ingenioso y original."
+    )
+    out = humor_model(
+        prompt,
+        max_length=60,
+        do_sample=True,
+        top_k=50,
+        top_p=0.9
+    )[0]["generated_text"]
+    joke = out.replace("\n", " ").strip()
+    return joke
 
 # ======================
 # FILE UPLOAD
@@ -81,85 +116,73 @@ TOPICS = [
 uploaded_file = st.file_uploader("📂 Subir archivo SemEval Task A (CSV / TSV)", type=["csv", "tsv"])
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file, sep="\t" if uploaded_file.name.endswith("tsv") else ",")
+    # Cargar TSV o CSV
+    if uploaded_file.name.endswith(".tsv"):
+        df = pd.read_csv(uploaded_file, sep="\t")
+    else:
+        df = pd.read_csv(uploaded_file)
+
+    st.subheader("🧪 Vista previa de los datos")
     st.dataframe(df.head())
+
+    # Intentar identificar columna de texto
+    text_col = None
+    for candidate in ["headline", "text", "sentence"]:
+        if candidate in df.columns:
+            text_col = candidate
+            break
+    if text_col is None:
+        # si no encontramos, usamos la última columna
+        text_col = df.columns[-1]
+
+    st.write(f"📌 Columna de texto usada para análisis: **{text_col}**")
 
     total = len(df)
     st.write(f"📦 Total de registros: **{total}**")
     st.write("---")
 
-    if st.button("🚀 Iniciar procesamiento"):
+    if st.button("🚀 Iniciar procesamiento completo (batch de 10)"):
         BATCH_SIZE = 10
         results = []
         progress_bar = st.progress(0)
         status = st.empty()
-        continue_flag = True
 
-        for i in range(0, total, BATCH_SIZE):
-            if not continue_flag:
-                break
+        for start in range(0, total, BATCH_SIZE):
+            end = min(start + BATCH_SIZE, total)
+            batch = df.iloc[start:end]
 
-            end = min(i + BATCH_SIZE, total)
-            batch = df.iloc[i:end]
+            st.warning(f"🔍 Analizando {start+1} → {end} de {total}…")
 
-            st.warning(f"🔍 Analizando {i+1} → {end} de {total}…")
+            texts = [str(t) for t in batch[text_col].tolist()]
+            # Clasificación por batch
+            topic_batch = detect_topic_batch(texts)
 
-            # Clasificación Zero-shot
-            zsc_results = classifier(
-                list(batch["headline"]),
-                candidate_labels=TOPICS
-            )
+            for (idx, row), (topic, score) in zip(batch.iterrows(), topic_batch):
+                text = str(row[text_col])
 
-            for idx, row in batch.iterrows():
-                text = str(row["headline"])
+                joke = generate_spanish_joke(topic, text)
 
-                # Detección de idioma
-                try:
-                    lang = detect(text)
-                except:
-                    lang = "unknown"
-
-                topic = zsc_results["labels"][idx-i][0]
-                score = float(zsc_results["scores"][idx-i][0])
-
-                # Chiste corto y gracioso en español
-                prompt = (
-                    f"Genera un chiste muy corto y gracioso en español "
-                    f"sobre el tema '{topic}' con humor ingenioso:"
-                )
-                joke_out = humor_model(prompt, max_length=60)
-                joke = joke_out[0]["generated_text"].strip()
-
-                results.append({
-                    "id": row["id"],
-                    "headline": text,
-                    "language": lang,
+                result_row = {
+                    "id": row[df.columns[0]] if "id" in df.columns else idx,
+                    "text": text,
                     "topic": topic,
                     "score": score,
                     "joke": joke
-                })
+                }
+                results.append(result_row)
 
                 progress_bar.progress(len(results) / total)
                 status.text(f"Procesados {len(results)}/{total}")
 
-            # Guardado parcial por batch
+            # Guardado parcial y botón de descarga
             partial_df = pd.DataFrame(results)
             st.download_button(
-                f"⬇️ Descargar parcial {end}",
+                f"⬇️ Descargar parcial hasta {end}",
                 partial_df.to_csv(index=False).encode("utf-8"),
                 file_name=f"partial_{end}.csv",
                 mime="text/csv",
                 key=f"partial_{end}"
             )
-
-            st.info("¿Continuar con el siguiente lote?")
-            col1, col2 = st.columns(2)
-            if col1.button(f"▶️ Sí ({end}/{total})", key=f"yes_{end}"):
-                continue_flag = True
-            if col2.button(f"⏹️ No ({end}/{total})", key=f"no_{end}"):
-                continue_flag = False
-                st.error("⛔ Proceso detenido por el usuario")
-                break
 
         # Final
         final_df = pd.DataFrame(results)
@@ -174,3 +197,5 @@ if uploaded_file:
         )
 
         st.balloons()
+else:
+    st.info("Sube un archivo CSV o TSV para comenzar el análisis.")
