@@ -34,11 +34,12 @@ a {
 </style>
 """, unsafe_allow_html=True)
 
+
 # ======================
 # HEADER + CREDITOS
 # ======================
 st.markdown("## [ ACCESS GRANTED ] Humor Topic Classifier :: Hacker Console")
-st.write("Zero-shot + Spanish Humor Generator 🧠⚡")
+st.write("Zero-shot Topic Detection + Spanish Humor Generator 🧠⚡")
 
 st.markdown("""
 📌 Designed by **Adolfo Camacho**  
@@ -46,6 +47,7 @@ st.markdown("""
 📧 turboplay333@gmail.com  
 ---
 """, unsafe_allow_html=True)
+
 
 # ======================
 # LOAD MODELS (CACHED)
@@ -65,16 +67,18 @@ def load_models():
 classifier, humor_model = load_models()
 st.success("🤖 Modelos cargados correctamente")
 
+
 TOPICS = [
     "política", "deportes", "tecnología", "salud",
     "negocios", "cine", "ciencia", "noticias",
     "animales", "famosos"
 ]
 
+
 # ======================
 # FILE UPLOAD
 # ======================
-uploaded_file = st.file_uploader("📂 Subir archivo (CSV / TSV)", type=["csv", "tsv"])
+uploaded_file = st.file_uploader("📂 Subir archivo SemEval Task A (CSV / TSV)", type=["csv", "tsv"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file, sep="\t" if uploaded_file.name.endswith("tsv") else ",")
@@ -84,7 +88,7 @@ if uploaded_file:
     st.write(f"📦 Total de registros: **{total}**")
     st.write("---")
 
-    if st.button("🚀 Procesar por lotes"):
+    if st.button("🚀 Iniciar procesamiento"):
         BATCH_SIZE = 10
         results = []
         progress_bar = st.progress(0)
@@ -98,7 +102,7 @@ if uploaded_file:
             end = min(i + BATCH_SIZE, total)
             batch = df.iloc[i:end]
 
-            st.warning(f"🔍 Analizando {i+1} → {end} de {total}")
+            st.warning(f"🔍 Analizando {i+1} → {end} de {total}…")
 
             # Clasificación Zero-shot
             zsc_results = classifier(
@@ -108,21 +112,20 @@ if uploaded_file:
 
             for idx, row in batch.iterrows():
                 text = str(row["headline"])
-                
+
                 # Detección de idioma
                 try:
                     lang = detect(text)
                 except:
                     lang = "unknown"
 
-                # Tema más probable
                 topic = zsc_results["labels"][idx-i][0]
                 score = float(zsc_results["scores"][idx-i][0])
 
-                # Chiste corto en español
+                # Chiste corto y gracioso en español
                 prompt = (
-                    f"Genera un chiste en español corto y muy gracioso "
-                    f"sobre el tema '{topic}', con humor ingenioso."
+                    f"Genera un chiste muy corto y gracioso en español "
+                    f"sobre el tema '{topic}' con humor ingenioso:"
                 )
                 joke_out = humor_model(prompt, max_length=60)
                 joke = joke_out[0]["generated_text"].strip()
@@ -139,7 +142,7 @@ if uploaded_file:
                 progress_bar.progress(len(results) / total)
                 status.text(f"Procesados {len(results)}/{total}")
 
-            # Guardado parcial
+            # Guardado parcial por batch
             partial_df = pd.DataFrame(results)
             st.download_button(
                 f"⬇️ Descargar parcial {end}",
@@ -158,10 +161,9 @@ if uploaded_file:
                 st.error("⛔ Proceso detenido por el usuario")
                 break
 
-        # Resultado final
+        # Final
         final_df = pd.DataFrame(results)
-        st.success("🎯 Procesamiento finalizado")
-
+        st.success("🎯 Procesamiento completado")
         st.dataframe(final_df)
 
         st.download_button(
