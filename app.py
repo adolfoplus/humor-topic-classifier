@@ -1,182 +1,114 @@
 import streamlit as st
 import pandas as pd
-from transformers import pipeline
 import time
+from transformers import pipeline
+from langdetect import detect
 
-# ======================
-# CONFIG & STYLES
-# ======================
+# =============== HACKER UI STYLE ================= #
 st.set_page_config(page_title="Humor Hacker Console", layout="wide")
 
-HACKER_STYLE = """
+st.markdown("""
 <style>
-body {
-    background-color: black;
-    color: #00ff99;
-    font-family: "Courier New", monospace;
+body, .stApp {
+    background-color: black !important;
+    color: #00FF9F !important;
+    font-family: "Courier New", monospace !important;
 }
-h1, h2, h3, h4, h5, h6 {
-    color: #00ff99;
-    text-shadow: 0 0 10px #00ff99;
+h1, h2, h3, h4 {
+    color: #00FF9F !important;
 }
-a { color: #00ffee !important; }
-div.stButton > button {
-    background-color: #002200;
-    color: #00ff99;
-    border: 1px solid #00ff99;
-}
-.stDownloadButton > button {
-    background-color: #001a00;
-    color: #00ff99 !important;
-    border: 1px solid #00ff99;
-}
-.stProgress > div > div {
-    background-color: #00ff99 !important;
+.block-container {
+    padding-top: 0rem;
 }
 </style>
-"""
-st.markdown(HACKER_STYLE, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# HEADER
-st.markdown("<h1>[ ACCESS GRANTED ] Humor Topic Classifier :: Hacker Console</h1>", unsafe_allow_html=True)
-st.write("Zero-shot Topic Detection + Spanish Humor Generator 💚")
-
+# Banner hacker
 st.markdown("""
-📌 **Designed by Adolfo Camacho**  
-🔗 [LinkedIn: adolfo-camacho-328a2a157](https://www.linkedin.com/in/adolfo-camacho-328a2a157)  
-📬 turboplay333@gmail.com
+# [ ACCESS GRANTED ] Humor Topic Classifier :: Hacker Console  
+Zero-shot BART + Spanish GPT :: Generating jokes with Mexican flavor...
+
+### Designed by Adolfo Camacho  
+🔗 [LinkedIn](https://www.linkedin.com/in/adolfo-camacho-328a2a157)  
+📧 turboplay333@gmail.com  
+
+---
 """)
-st.write("---")
 
-# ======================
-# LOAD MODELS
-# ======================
-st.write("💾 Loading AI Agents into memory… Please wait")
+# === INPUT FILE === #
+st.subheader("[ INPUT ] Load SemEval Task-A file (CSV / TSV)")
 
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
-lang_detector = pipeline("text-classification",
-                         model="papluca/xlm-roberta-base-language-detection")
-joke_model = pipeline("text-generation", model="gpt2")
+uploaded_file = st.file_uploader("Drop your CSV/TSV file here", type=["csv", "tsv"])
 
-st.success("🟢 Models ready for cyber-infiltration")
-
-
-TOPIC_LABELS_EN = [
-    "politics", "celebrities", "sports", "animals", "technology",
-    "health", "business", "movies", "science", "news"
-]
-
-# ======================
-# LANGUAGE & TOPIC UTILS
-# ======================
-def detect_lang(text):
-    try:
-        res = lang_detector(text[:200])
-        return res[0]["label"].lower()
-    except:
-        return "unknown"
-
-def translate_topic(topic):
-    mapping = {
-        "politics": "política", "celebrities": "famosos", "sports": "deportes",
-        "animals": "animales", "technology": "tecnología", "health": "salud",
-        "news": "noticias", "business": "negocios", "movies": "cine", "science": "ciencia"
-    }
-    return mapping.get(topic, topic)
-
-def generate_spanish_joke(text, topic_es):
-    prompt = f"Cuéntame un chiste corto y gracioso en español sobre {topic_es}: {text} ->"
-    result = joke_model(prompt, max_length=60, do_sample=True, top_k=50, top_p=0.92)[0]["generated_text"]
-    joke = result.replace("\n", " ").strip()
-    return joke
-
-
-# ======================
-# FILE INPUT
-# ======================
-uploaded = st.file_uploader("📂 Upload SemEval Task-A CSV / TSV", type=["csv", "tsv"])
-
-if uploaded:
-    if uploaded.name.endswith(".tsv"):
-        df = pd.read_csv(uploaded, sep="\t")
+if uploaded_file:
+    if uploaded_file.name.endswith(".tsv"):
+        df = pd.read_csv(uploaded_file, sep="\t")
     else:
-        df = pd.read_csv(uploaded)
+        df = pd.read_csv(uploaded_file)
 
-    df.columns = ["id", "word1", "word2", "headline"]
-
-    st.subheader("🧪 Preview")
     st.dataframe(df.head())
 
+    classification_pipe = pipeline("zero-shot-classification",
+        model="facebook/bart-large-mnli"
+    )
+
+    joke_pipe = pipeline("text-generation",
+        model="mrm8488/t5-base-finetuned-spanish-jokes"
+    )
+
+    label_choices = ["politics", "sports", "technology", "health"]
+
+    st.markdown("---")
+    st.subheader("🚀 Procesando textos y generando humor...")
 
     total = len(df)
-    st.write(f"🧩 Total records detected: **{total}**")
+    batch_size = 10
+    processed_jokes = []
 
-    st.write("---")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
-    if st.button("🚀 Launch Humor Processing (Batch Mode)"):
-        BATCH_SIZE = 10
-        progress = st.progress(0)
+    for start in range(0, total, batch_size):
+        end = min(start + batch_size, total)
+        batch = df.iloc[start:end]
 
-        topics_en, topics_es, scores, jokes = [], [], [], []
-        continue_flag = True
+        for i, row in batch.iterrows():
+            text = row["headline"]
 
-        for start in range(0, total, BATCH_SIZE):
-            if not continue_flag:
-                break
+            detected_lang = detect(text)
 
-            end = min(start + BATCH_SIZE, total)
-            batch = df.iloc[start:end]
+            # Clasificación Zero-shot
+            result = classification_pipe(text, candidate_labels=label_choices)
+            topic = result["labels"][0]
 
-            st.warning(f"🔍 Analyzing rows {start+1} to {end} / {total} ...")
+            # Prompt según idioma
+            if detected_lang == "es":
+                prompt = f"Cuéntame un chiste corto sobre {topic}:"
+            else:
+                prompt = f"Tell me a short joke about {topic}:"
 
-            result_batch = classifier(list(batch["headline"]), TOPIC_LABELS_EN)
+            joke = joke_pipe(prompt, max_length=50)[0]["generated_text"]
 
-            for i, text in enumerate(batch["headline"]):
-                top_topic = result_batch["labels"][i][0]
-                score = float(result_batch["scores"][i][0])
+            processed_jokes.append({
+                "id": row["id"],
+                "headline": text,
+                "language": detected_lang,
+                "topic": topic,
+                "joke": joke
+            })
 
-                topic_es = translate_topic(top_topic)
-                joke = generate_spanish_joke(text, topic_es)
+            progress_bar.progress((i + 1) / total)
+            status_text.text(f"Procesado {i+1}/{total}")
 
-                topics_en.append(top_topic)
-                topics_es.append(topic_es)
-                scores.append(score)
-                jokes.append(joke)
+        # 🔥 Después de cada 10 → pausa para confirmar
+        if end < total:
+            st.warning(f"Se procesaron {end}/{total}. ¿Quieres continuar? 👀")
+            cont = st.button("Continuar con los siguientes 10")
+            if not cont:
+                st.stop()
 
-            # Save partial progress
-            df_partial = df.iloc[:end].copy()
-            df_partial["topic_en"] = topics_en
-            df_partial["topic_es"] = topics_es
-            df_partial["score"] = scores
-            df_partial["joke"] = jokes
+    res_df = pd.DataFrame(processed_jokes)
+    st.success("🎉 ¡Procesamiento completado!")
+    st.dataframe(res_df)
 
-            progress.progress(end/total)
-
-            st.success(f"💾 Partial export ready up to row {end}")
-            st.download_button(f"⬇️ Download partial {end}",
-                               df_partial.to_csv(index=False).encode("utf-8"),
-                               file_name=f"partial_{end}.csv",
-                               mime="text/csv")
-
-            # Pause for user decision
-            st.info("⚠️ Continue with next cyber-batch?")
-            colA, colB = st.columns(2)
-            if colA.button(f"▶️ Continue {end}", key=f"c{end}"):
-                continue_flag = True
-            if colB.button(f"⏹️ Stop {end}", key=f"s{end}"):
-                st.error("🚫 Processing stopped by the operator.")
-                continue_flag = False
-
-        # === FINAL EXPORT ===
-        df_final = df.copy()
-        df_final["topic_en"] = topics_en
-        df_final["topic_es"] = topics_es
-        df_final["score"] = scores
-        df_final["joke"] = jokes
-
-        st.success("🎉 Mission Completed. Humor decrypted and archived.")
-        st.download_button("⬇️ Download final humor file",
-                           df_final.to_csv(index=False).encode("utf-8"),
-                           file_name="humor_output.csv",
-                           mime="text/csv")
-        st.balloons()
+    st.download_button("📥 Descargar resultados", res_df.to_csv(index=False), "humor_results.csv")
