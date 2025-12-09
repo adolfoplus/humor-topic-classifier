@@ -1,9 +1,10 @@
-streamlit==1.32.0
-transformers==4.37.2
-torch==2.1.0
-pandas
-tqdm
-sentencepiece
+streamlit==1.52.1
+transformers==4.57.3
+pandas==2.3.3
+sentencepiece==0.2.0
+langdetect==1.0.9
+
+
 
 
 
