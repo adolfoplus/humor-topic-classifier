@@ -7,180 +7,151 @@ import torch
 import time
 import os
 
-# === CONFIGURACIÓN DE PÁGINA ===
-st.set_page_config(
-    page_title="Humor Topic Classifier",
-    layout="wide",
-    page_icon="😂",
-)
+st.set_page_config(page_title="Humor Topic Classifier", layout="wide", page_icon="😂")
 
-# === ESTILO OSCURO PREMIUM ===
-dark_style = """
+# ====== CSS Premium Refinado ======
+st.markdown("""
 <style>
-body {
-    background-color: #121212 !important;
+/* Title */
+h1 {
+    text-align:center;
+    font-weight:900 !important;
+    font-size:32px !important;
+    color:#00ADB5 !important;
 }
-section.main > div {
-    background-color: #121212 !important;
+
+/* Upload box center-align */
+.block-container {
+    padding-top: 2rem !important;
 }
-.stTitle, .stHeader, h1, h2, h3, h4, h5, h6, label {
-    color: #ffffff !important;
+
+/* Card style */
+div[data-testid="stFileUploader"] {
+    border: 2px dashed #00ADB5 !important;
+    border-radius: 15px !important;
+    padding: 25px !important;
 }
-.stButton button {
-    background-color: #00ADB5 !important;
-    color: #ffffff !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
+
+/* Buttons */
+button {
+    border-radius: 12px !important;
+    font-weight:600 !important;
 }
-.stProgress > div > div {
-    background-color: #00ADB5 !important;
-}
-.sidebar .sidebar-content {
-    background-color: #1E1E1E !important;
-}
-footer {
-    visibility: hidden;
-}
+
+/* Footer */
+footer, header {visibility: hidden;}
 </style>
-"""
-st.markdown(dark_style, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# === LOGO & BRANDING HEADER ===
+# Logo + Title center
+st.markdown("<h1>😂 Humor Topic Classifier</h1>", unsafe_allow_html=True)
 st.markdown(
-    """
-    <h1 style="color:#00ADB5; font-weight:800; text-align:center;">
-        😂 Humor Topic Classifier
-    </h1>
-    <p style="text-align:center; color:#9E9E9E">
-        Zero-Shot BERT • SemEval Humor Task
-    </p>
-    """,
-    unsafe_allow_html=True,
+    "<p style='text-align:center; color:#AAAAAA;'>Zero-Shot BERT • SemEval Humor Task</p>",
+    unsafe_allow_html=True
 )
 
-uploaded_file = st.file_uploader(
-    "📂 Sube tu archivo CSV/TSV del Task-A", type=["csv", "tsv"]
-)
+uploaded_file = st.file_uploader("📂 Drag or Browse your CSV/TSV file", type=["csv", "tsv"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file, sep=None, engine="python")
-    st.subheader("📊 Datos detectados:")
+    st.markdown("### 📊 Preview of Input Data")
     st.dataframe(df.head())
 
-    # Limpieza de texto
     def build_text(row):
         if "headline" in df.columns and isinstance(row["headline"], str) and row["headline"].strip() != "-":
             return row["headline"].strip()
         if "word1" in df.columns and "word2" in df.columns:
             return f"{str(row['word1'])} {str(row['word2'])}".strip()
         return ""
-    
+
     df["text_clean"] = df.apply(build_text, axis=1)
 
-    # === Cargando modelo ===
-    st.subheader("🧠 Cargando modelo…")
+    st.markdown("### 🧠 Loading Zero-Shot model…")
     classifier = pipeline(
         "zero-shot-classification",
         model="facebook/bart-large-mnli",
         device=0 if torch.cuda.is_available() else -1
     )
-    st.success("✔ Modelo cargado con éxito")
+    st.success("Model Loaded ✔")
 
-    candidate_labels = [
-        "política", "celebridades", "tecnología", "animales", "comida",
-        "deportes", "sexo", "crimen", "religión", "salud",
-        "trabajo", "dinero", "educación", "familia", "medio ambiente",
-        "ciencia", "música", "cine", "internet", "militar"
+    labels = [
+        "política","celebridades","tecnología","animales","comida",
+        "deportes","sexo","crimen","religión","salud",
+        "trabajo","dinero","educación","familia","medio ambiente",
+        "ciencia","música","cine","internet","militar"
     ]
 
     texts = df["text_clean"].tolist()
     total = len(texts)
     batch_size = 32
-
     topics, scores = [], []
-
     progress_bar = st.progress(0)
-    status_text = st.empty()
-    log_box = st.container()
+    status = st.empty()
+    logs = st.container()
     start_time = time.time()
 
-    output_file = "parcial_clasificacion.csv"
+    out_csv = "parcial_clasificacion.csv"
 
-    st.subheader(f"🔄 Procesando {total} textos…")
+    st.markdown("### 🔄 Classifying…")
 
     try:
         for i in range(0, total, batch_size):
-            batch_texts = texts[i:i + batch_size]
-
-            results = classifier(
-                batch_texts,
-                candidate_labels,
+            res = classifier(
+                texts[i:i+batch_size],
+                labels,
                 hypothesis_template="Este texto es sobre {}."
             )
-            for r in results:
+
+            for r in res:
                 topics.append(r["labels"][0])
                 scores.append(r["scores"][0])
 
-            df.loc[:len(topics)-1, "topic_bert"] = topics
-            df.loc[:len(scores)-1, "topic_score"] = scores
-            df.to_csv(output_file, index=False)
+            df.loc[:len(topics)-1,"topic_bert"]=topics
+            df.loc[:len(scores)-1,"topic_score"]=scores
+            df.to_csv(out_csv,index=False)
 
-            elapsed = time.time() - start_time
-            progress = (i + batch_size) / total
-            eta = elapsed / progress - elapsed if progress > 0 else 0
+            elapsed=time.time()-start_time
+            progress=(i+batch_size)/total
+            eta=elapsed/progress-elapsed if progress>0 else 0
 
             progress_bar.progress(progress)
-            status_text.write(
-                f"✔ {i+batch_size}/{total} filas • "
-                f"{progress*100:.1f}% • ⏱ {elapsed/60:.1f} min • "
-                f"ETA: {eta/60:.1f} min"
-            )
+            status.info(f"✔ {i+batch_size}/{total} • {progress*100:.1f}% • "
+                        f"⏱ {elapsed/60:.1f}m • ETA {eta/60:.1f}m")
 
-            with log_box:
-                st.markdown(f"🟦 Procesado batch hasta fila **{i+batch_size}**")
+            with logs:
+                st.write(f"🟦 Progress: {i+batch_size} rows processed")
 
             st.download_button(
-                "📥 Descargar avance",
+                "📥 Download Partial",
                 df.to_csv(index=False).encode("utf-8"),
-                "clasificacion_parcial.csv",
-                "text/csv",
-                key=f"partial_{i}"
+                "partial_result.csv",
+                key=f"p{i}"
             )
 
-        status_text.write("🎉 Clasificación completada!")
+        status.success("🎉 Classification Complete")
 
     except Exception as e:
-        st.error(f"❌ Error durante procesamiento: {e}")
-        st.warning("Se guardó el progreso parcial")
+        st.error("❌ Error occurred — Partial saved")
 
-    # === Resultados ===
-    st.subheader("📈 Distribución de temas")
-
-    fig, ax = plt.subplots(figsize=(10,7))
+    st.markdown("### 📈 Topic Distribution")
+    fig, ax = plt.subplots(figsize=(10,6))
     sns.countplot(
         data=df[df["topic_bert"].notna()],
         y="topic_bert",
         order=df["topic_bert"].value_counts().index,
-        ax=ax,
-        palette="cool"
+        palette="turbo"
     )
     st.pyplot(fig)
 
-    st.subheader("📥 Descargar resultados completos")
     st.download_button(
-        "Descargar CSV final",
+        "📥 Download Final Result CSV",
         df.to_csv(index=False).encode("utf-8"),
-        "temas_clasificados_final.csv",
-        "text/csv"
+        "final_output.csv"
     )
 
-# === FOOTER DE MARCA ===
+# Footer
 st.markdown(
-    """
-    <hr>
-    <p style='text-align:center; color:#757575; font-size: 14px;'>
-        Designed by <b style="color:#00ADB5;">Adolfo Camacho</b>
-    </p>
-    """,
-    unsafe_allow_html=True,
+    "<br><br><p style='text-align:center; color:#777;'>Designed by "
+    "<strong style='color:#00ADB5;'>Adolfo Camacho</strong></p>",
+    unsafe_allow_html=True
 )
