@@ -1,382 +1,196 @@
 import streamlit as st
 import pandas as pd
 import time
-import torch
 from transformers import pipeline
-import matplotlib.pyplot as plt
-import seaborn as sns
+from langdetect import detect
 
-# =========================
-# CONFIGURACIÓN GENERAL
-# =========================
-st.set_page_config(
-    page_title="Humor Hacker Console 😂",
-    page_icon="💻",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# =======================
+# HACKER CSS UI
+# =======================
+st.set_page_config(page_title="Humor Hacker Console", layout="wide")
 
-# =========================
-# ESTILO TERMINAL HACKER
-# =========================
-st.markdown("""
+HACKER_STYLE = """
 <style>
 body {
-    background-color: #020b02;
+    background-color: black;
+    color: #00ff99;
+    font-family: "Courier New", monospace;
 }
-.block-container {
-    padding-top: 1.5rem;
+h1, h2, h3, h4 { color: #00ff99; text-shadow: 0 0 12px #00ff99; }
+a { color: #00e6e6; }
+div.stButton > button {
+    background-color: #003300;
+    color: #00ff99;
+    border: 1px solid #00ff99;
 }
-* {
-    font-family: "Source Code Pro", "Consolas", "Courier New", monospace;
-}
-h1, h2, h3, h4, h5, h6, p, span, li, label {
-    color: #00ff7f !important;
-}
-a {
-    color: #00e0ff !important;
-}
-table tbody tr:hover {
-    background-color: rgba(0, 255, 127, 0.08) !important;
+.stDownloadButton > button {
+    background-color: #001a1a;
+    color: #00ff99 !important;
+    border: 1px solid #00ff99;
 }
 .stProgress > div > div {
-    background-color: #00ff7f;
-}
-hr {
-    border-top: 1px solid rgba(0,255,127,0.35);
+    background-color: #00ff99;
 }
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(HACKER_STYLE, unsafe_allow_html=True)
 
-# =========================
-# HEADER
-# =========================
+# =======================
+# HEADER / CREDITOS
+# =======================
+st.markdown("<h1>[ ACCESS GRANTED ] Humor Topic Classifier :: Hacker Console</h1>", unsafe_allow_html=True)
+st.write("Zero-shot Classification + Spanish Humor Generation — Cyber Style 💚")
+
 st.markdown("""
-<div style="
-    border: 1px solid rgba(0,255,127,0.4);
-    padding: 0.75rem 1rem;
-    background: radial-gradient(circle at top left, rgba(0,255,127,0.2), transparent 55%);
-    box-shadow: 0 0 18px rgba(0,255,127,0.25);
-">
-    <div style="font-size: 1.6rem; color:#00ff7f;">
-        [ ACCESS GRANTED ] Humor Topic Classifier :: Hacker Console
-    </div>
-    <div style="font-size: 0.95rem; color:#7CFC00; margin-top: 4px;">
-        Zero-shot BART + Spanish GPT :: Generating jokes with Mexican flavor...
-    </div>
-</div>
-""", unsafe_allow_html=True)
+📌 **Designed by Adolfo Camacho**  
+🔗 [LinkedIn](https://www.linkedin.com/in/adolfo-camacho-328a2a157)  
+📬 turboplay333@gmail.com
+""")
 
-# =========================
-# CRÉDITO PROFESIONAL AL INICIO
-# =========================
-st.markdown("""
-<div style="width:100%; text-align:center; margin-top:10px; margin-bottom:18px;">
-    <div style="font-size:14px; color:#00ff7f; text-shadow:0 0 6px rgba(0,255,127,0.7);">
-        Designed by <strong>Adolfo Camacho</strong>
-    </div>
-    <div style="font-size:13px; margin-top:4px;">
-        🔗 <a href="https://www.linkedin.com/in/adolfo-camacho-328a2a157" target="_blank">
-        LinkedIn: adolfo-camacho-328a2a157</a>
-    </div>
-    <div style="font-size:13px; margin-top:2px;">
-        📧 <a href="mailto:turboplay333@gmail.com">turboplay333@gmail.com</a>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+st.write("---")
 
-st.markdown("---")
+# =======================
+# MODELOS
+# =======================
+st.write("🛰️ Cargando modelos…")
+classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+joke_model = pipeline("text-generation", model="gpt2", tokenizer="gpt2")
+st.success("✔ Modelos listos")
 
-# =========================
-# UPLOAD DE ARCHIVO
-# =========================
-st.markdown("`[ INPUT ]`  Load SemEval Task-A file (CSV / TSV)")
-uploaded_file = st.file_uploader(
-    "Drop or browse your CSV/TSV file here",
-    type=["csv", "tsv"]
-)
+TOPIC_LABELS_EN = [
+    "politics", "celebrities", "sports", "animals", "technology", "health",
+    "news", "business", "movies", "science"
+]
 
-# =========================
-# DEFINICIÓN DE TEMAS Y ESTILOS DE HUMOR
-# =========================
-TOPIC_INFO = {
-    "politics": {
-        "es": "política",
-        "style": "Haz un chiste corto y gracioso con humor mexicano sobre política. Sarcástico sin pasarse."
-    },
-    "celebrities": {
-        "es": "celebridades",
-        "style": "Haz un chiste divertido y chismoso sobre celebridades."
-    },
-    "sports": {
-        "es": "deportes",
-        "style": "Haz un chiste futbolero o de deportes tipo compas echando relajo."
-    },
-    "animals": {
-        "es": "animales",
-        "style": "Haz un chiste tierno y simpático sobre animales, con humor ligero."
-    },
-    "technology": {
-        "es": "tecnología",
-        "style": "Haz un chiste nerd de tecnología, como compa techie burlándose."
-    },
-    "health": {
-        "es": "salud",
-        "style": "Haz un chiste ligero sobre salud, sin faltar al respeto."
-    },
-    "food": {
-        "es": "comida",
-        "style": "Haz un chiste sabroso tipo taquiza, con humor mexicano."
-    },
-    "religion": {
-        "es": "religión",
-        "style": "Haz un chiste suave y respetuoso sobre religión."
-    },
-    "crime": {
-        "es": "crimen",
-        "style": "Haz un chiste de humor negro suave sobre crimen, sin glorificar la violencia."
-    },
-    "money": {
-        "es": "dinero",
-        "style": "Haz un chiste sobre estar roto y pagar cuentas, estilo mexicano."
-    },
-    "work": {
-        "es": "trabajo",
-        "style": "Haz un chiste godín de oficina, con humor mexicano."
-    },
-    "family": {
-        "es": "familia",
-        "style": "Haz un chiste sobre la familia mexicana, con cariño."
-    },
-    "internet": {
-        "es": "internet y redes sociales",
-        "style": "Haz un chiste de memes o redes sociales, con humor mexicano."
-    }
-}
+BATCH_SIZE = 10
 
-TOPIC_LABELS_EN = list(TOPIC_INFO.keys())
+# =======================
+# FUNCIONES
+# =======================
 
-# =========================
-# FUNCIONES AUXILIARES
-# =========================
-def safe_score_to_float(s):
+def detect_language(text):
     try:
-        if hasattr(s, "detach"):
-            s = s.detach()
-        if hasattr(s, "cpu"):
-            s = s.cpu()
-        if hasattr(s, "numpy"):
-            s = s.numpy()
-        return float(s)
-    except Exception:
-        return float(s.item()) if hasattr(s, "item") else float(s)
+        lang = detect(text)
+        return lang
+    except:
+        return "unknown"
 
+def clean_joke(j):
+    j = j.replace("\n", " ").strip()
+    j = j.replace("Dame un chiste", "").replace("Tell me a joke", "")
+    return j
 
-def build_text(row, cols):
-    if "headline" in cols and isinstance(row.get("headline", ""), str) and row["headline"].strip() != "-":
-        return row["headline"].strip()
-    if "word1" in cols and "word2" in cols:
-        return f"{str(row['word1'])} {str(row['word2'])}".strip()
-    return ""
+def translate_topic(topic):
+    mapping = {
+        "politics": "Política", "celebrities": "Celebridades", "sports": "Deportes",
+        "animals": "Animales", "technology": "Tecnología", "health": "Salud",
+        "news": "Noticias", "business": "Negocios", "movies": "Cine", "science": "Ciencia"
+    }
+    return mapping.get(topic, topic)
 
+def generate_spanish_joke(text, topic):
+    prompt = f"Genera un chiste corto en español sobre {topic.lower()} relacionado con: {text} --> "
+    output = joke_model(prompt, max_length=80, do_sample=True)[0]["generated_text"]
+    return clean_joke(output)
 
-def clean_joke(joke, max_len=140):
-    joke = joke.replace("<|endoftext|>", " ")
-    joke = " ".join(joke.split())
-    if len(joke) > max_len:
-        joke = joke[:max_len-3] + "..."
-    return joke.strip()
+# =======================
+# SUBIDA DE ARCHIVO
+# =======================
 
+uploaded_file = st.file_uploader("📂 Sube tu archivo SemEval (CSV/TSV)", type=["csv", "tsv"])
 
-def make_prompt(text, topic_en):
-    info = TOPIC_INFO.get(topic_en, {"es": "algo", "style": "Haz un chiste gracioso en español."})
-    prompt = (
-        f"Título de noticia: \"{text}\".\n"
-        f"{info['style']}\n"
-        f"Chiste:"
-    )
-    return prompt, info["es"]
+if uploaded_file is not None:
+    if uploaded_file.name.endswith(".tsv"):
+        df = pd.read_csv(uploaded_file, sep="\t")
+    else:
+        df = pd.read_csv(uploaded_file)
 
-# =========================
-# LÓGICA PRINCIPAL
-# =========================
-if uploaded_file:
-    # Detectar formato
-    ext = uploaded_file.name.split(".")[-1].lower()
-    sep = "," if ext == "csv" else "\t"
-    df = pd.read_csv(uploaded_file, sep=sep)
+    df.columns = ["id", "word1", "word2", "headline"]
+    st.write("🧪 Vista previa")
+    st.dataframe(df.head())
 
-    st.markdown("`[ PREVIEW ]`  First rows of loaded file")
-    st.dataframe(df.head(), use_container_width=True)
-
-    df["text_clean"] = df.apply(lambda r: build_text(r, df.columns), axis=1)
     total_rows = len(df)
 
-    # =========================
-    # CARGA DE MODELOS
-    # =========================
-    st.markdown("`[ MODELS ]`  Initializing Zero-Shot & Joke Generator...")
-    load_txt = st.empty()
+    st.write("---")
+    if st.button("🔥 Iniciar procesamiento"):
+        progress_bar = st.progress(0)
 
-    device_id = 0 if torch.cuda.is_available() else -1
-    device_label = "cuda:0" if torch.cuda.is_available() else "cpu"
+        topics_en, topics_es, scores, jokes = [], [], [], []
 
-    load_txt.markdown(f"`-> Zero-Shot on {device_label} ...`")
-    classifier = pipeline(
-        "zero-shot-classification",
-        model="valhalla/distilbart-mnli-12-1",
-        device=device_id
-    )
-    load_txt.markdown(f"`-> Zero-Shot online ✔  [{device_label}]`")
-    time.sleep(0.4)
+        continue_flag = True
 
-    load_txt.markdown("`-> Loading Spanish GPT joke model ...`")
-    joke_model = pipeline(
-        "text-generation",
-        model="datificate/gpt2-spanish",
-        device=device_id
-    )
-    load_txt.markdown("`-> Joke model online ✔`")
-    time.sleep(0.4)
+        for start in range(0, total_rows, BATCH_SIZE):
+            if not continue_flag:
+                break
 
-    st.markdown("---")
-    st.markdown("`[ PROCESSING ]`  Classifying topics & generating jokes")
+            end = min(start + BATCH_SIZE, total_rows)
+            batch = df.iloc[start:end]
 
-    # =========================
-    # ANIMACIÓN H1 – MATRIX PULSE
-    # =========================
-    anim_slot = st.empty()
-    bars_frames = [
-        "█ ▇ ▆ ▅ ▄ ▂ ▁ ▂ ▄ ▅ ▆ ▇ █",
-        "▇ ▆ ▅ ▄ ▂ ▁ ▂ ▄ ▅ ▆ ▇ █ ▇",
-        "▆ ▅ ▄ ▂ ▁ ▂ ▄ ▅ ▆ ▇ █ ▇ ▆",
-        "▅ ▄ ▂ ▁ ▂ ▄ ▅ ▆ ▇ █ ▇ ▆ ▅",
-        "▄ ▂ ▁ ▂ ▄ ▅ ▆ ▇ █ ▇ ▆ ▅ ▄",
-        "▂ ▁ ▂ ▄ ▅ ▆ ▇ █ ▇ ▆ ▅ ▄ ▂",
-        "▁ ▂ ▄ ▅ ▆ ▇ █ ▇ ▆ ▅ ▄ ▂ ▁",
-    ]
-    frame_i = 0
+            st.write(f"🔍 Procesando textos {start+1} a {end}/{total_rows}…")
 
-    # Barra de progreso y vistas
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    preview_table = st.empty()
-    partial_download_btn = st.empty()
+            # Clasificación
+            results = classifier(list(batch["headline"]), TOPIC_LABELS_EN)
 
-    topics_es = []
-    topics_en_used = []
-    scores = []
-    jokes = []
+            for i, text in enumerate(batch["headline"]):
+                lang = detect_language(text)
 
-    for idx, row in df.iterrows():
-        text = row["text_clean"]
+                top_topic = results["labels"][i][0]
+                score = float(results["scores"][i][0])
 
-        # Actualizar animación tipo terminal
-        anim_slot.markdown(
-            f"<div style='font-size:26px; color:#00ff7f; text-align:center; "
-            f"text-shadow:0 0 10px rgba(0,255,127,0.8);'>{bars_frames[frame_i]}</div>",
-            unsafe_allow_html=True
-        )
-        frame_i = (frame_i + 1) % len(bars_frames)
+                topic_es = translate_topic(top_topic)
 
-        if not isinstance(text, str) or not text.strip():
-            topics_es.append(None)
-            topics_en_used.append(None)
-            scores.append(0.0)
-            jokes.append("")
-        else:
-            # Clasificación de tema
-            res = classifier(text, TOPIC_LABELS_EN, hypothesis_template="This is about {}.")
-            topic_en = res["labels"][0]
-            score = safe_score_to_float(res["scores"][0])
+                joke = generate_spanish_joke(text, topic_es)
 
-            # Prompt y chiste
-            prompt, topic_es = make_prompt(text, topic_en)
-            out = joke_model(
-                prompt,
-                max_length=80,
-                num_return_sequences=1,
-                do_sample=True,
-                top_p=0.92,
-                temperature=0.9
+                # Corrección de idioma
+                if detect_language(joke) != "es":
+                    joke = generate_spanish_joke(text, topic_es)
+
+                topics_en.append(top_topic)
+                topics_es.append(topic_es)
+                scores.append(score)
+                jokes.append(joke)
+
+            # Parcial
+            df_partial = df.iloc[:end].copy()
+            df_partial["topic_en"] = topics_en
+            df_partial["topic_es"] = topics_es
+            df_partial["score"] = scores
+            df_partial["joke"] = jokes
+
+            progress_bar.progress(end / total_rows)
+
+            st.success(f"✔ Guardado parcial hasta fila {end}")
+            st.download_button(
+                "⬇️ Descargar progreso parcial",
+                df_partial.to_csv(index=False).encode("utf-8"),
+                file_name=f"partial_{end}.csv",
+                mime="text/csv",
+                key=f"partial_{end}"
             )
-            full = out[0]["generated_text"]
-            generated = full[len(prompt):].strip()
-            joke = clean_joke(generated)
 
-            topics_es.append(topic_es)
-            topics_en_used.append(topic_en)
-            scores.append(score)
-            jokes.append(joke)
+            # Confirmación usuario
+            st.write("¿Continuar con el siguiente lote?")
+            col1, col2 = st.columns(2)
+            if col1.button("▶️ Sí", key=f"yes_{end}"):
+                continue_flag = True
+            if col2.button("⏹️ No", key=f"no_{end}"):
+                st.warning("🚫 Proceso detenido por el usuario.")
+                continue_flag = False
 
-        # DataFrame parcial
-        df_partial = df.copy()
-        df_partial["topic_en"] = topics_en_used + [None] * (total_rows - len(topics_en_used))
-        df_partial["topic"] = topics_es + [None] * (total_rows - len(topics_es))
-        df_partial["score"] = scores + [None] * (total_rows - len(scores))
-        df_partial["joke"] = jokes + [""] * (total_rows - len(jokes))
+        st.success("🎉 Proceso finalizado")
+        st.balloons()
 
-        progress = (idx + 1) / total_rows
-        progress_bar.progress(progress)
-        status_text.markdown(
-            f"`row {idx+1}/{total_rows}  ::  {progress*100:5.1f}% complete`"
-        )
+        # Export final
+        df_final = df.copy()
+        df_final["topic_en"] = topics_en
+        df_final["topic_es"] = topics_es
+        df_final["score"] = scores
+        df_final["joke"] = jokes
 
-        preview_table.dataframe(
-            df_partial[["text_clean", "topic", "score", "joke"]].tail(20),
-            use_container_width=True
-        )
-
-        partial_download_btn.download_button(
-            label=f"📥 Download partial CSV ({idx+1}/{total_rows})",
-            data=df_partial.to_csv(index=False).encode("utf-8"),
-            file_name="progress_partial_jokes.csv",
+        st.download_button(
+            "⬇️ Descargar archivo final",
+            df_final.to_csv(index=False).encode("utf-8"),
+            file_name="humor_output.csv",
             mime="text/csv",
-            key=f"partial_{idx}"
+            key="final"
         )
-
-    st.success("`[ DONE ]`  All rows processed. Topics + jokes ready ✔")
-
-    # =========================
-    # RESULTADOS FINALES
-    # =========================
-    df_final = df.copy()
-    df_final["topic_en"] = topics_en_used
-    df_final["topic"] = topics_es
-    df_final["score"] = scores
-    df_final["joke"] = jokes
-
-    st.markdown("`[ OUTPUT ]`  Export classified humor dataset")
-    st.download_button(
-        label="📥 Download full CSV",
-        data=df_final.to_csv(index=False).encode("utf-8"),
-        file_name="humor_es_results_hacker_console.csv",
-        mime="text/csv"
-    )
-
-    # =========================
-    # GRÁFICO DE TEMAS
-    # =========================
-    st.markdown("`[ ANALYTICS ]`  Topic distribution (ES)")
-    if df_final["topic"].notna().any():
-        fig, ax = plt.subplots(figsize=(7, 4))
-        sns.countplot(
-            data=df_final[df_final["topic"].notna()],
-            y="topic",
-            order=df_final["topic"].value_counts().index,
-            ax=ax,
-            color="#00ff7f"
-        )
-        ax.set_xlabel("Count", color="#00ff7f")
-        ax.set_ylabel("Topic (ES)", color="#00ff7f")
-        for spine in ax.spines.values():
-            spine.set_edgecolor("#00ff7f")
-        ax.tick_params(colors="#00ff7f")
-        fig.patch.set_facecolor("#020b02")
-        ax.set_facecolor("#020b02")
-        st.pyplot(fig)
-    else:
-        st.info("No hay suficientes datos para el gráfico.")
-
-else:
-    st.markdown("`[ IDLE ]`  Waiting for input file... drop CSV/TSV above.")
