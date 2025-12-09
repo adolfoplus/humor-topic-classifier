@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from transformers import pipeline
+import os
 
 # ======================
 # HACKER UI CONFIG
@@ -50,15 +51,21 @@ st.markdown("""
 # ======================
 @st.cache_resource
 def load_models():
+    hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+
     classifier = pipeline(
         "zero-shot-classification",
-        model="valhalla/distilbart-mnli-12-1"
+        model="valhalla/distilbart-mnli-12-1",
+        use_auth_token=hf_token
     )
+
     humor_model = pipeline(
         "text2text-generation",
-        model="mrm8488/t5-small-spanish-jokes"  # 🔥 Modelo ligero de humor
+        model="mrm8488/t5-small-spanish-jokes",
+        use_auth_token=hf_token
     )
     return classifier, humor_model
+
 
 classifier, humor_model = load_models()
 st.success("🤖 Modelos cargados correctamente.")
@@ -101,7 +108,6 @@ if uploaded_file:
             zsc = classifier(texts, candidate_labels=TOPICS)
 
             for i, row in enumerate(batch.itertuples()):
-                # ZERO-SHOT seguro
                 try:
                     topic = zsc[i]["labels"][0]
                     score = float(zsc[i]["scores"][0])
@@ -109,7 +115,7 @@ if uploaded_file:
                     topic = "desconocido"
                     score = 0.0
 
-                # 🎭 CHISTE ESPAÑOL
+                # 🎭 CHISTE ESPAÑOL AHORA FUNCIONA
                 prompt = f"Cuento algo gracioso sobre {topic}:"
                 joke = humor_model(prompt, max_length=50)[0]["generated_text"].strip()
 
