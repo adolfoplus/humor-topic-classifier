@@ -60,7 +60,6 @@ def load_models():
     )
     return classifier, humor_model
 
-
 classifier, humor_model = load_models()
 st.success("🤖 Modelos cargados correctamente.")
 
@@ -70,30 +69,17 @@ TOPICS = [
     "animales", "famosos"
 ]
 
-
 # ======================
 # FILE UPLOAD
 # ======================
-uploaded_file = st.file_uploader("📂 Subir archivo SemEval Task A (CSV / TSV)", type=["csv", "tsv"])
+uploaded_file = st.file_uploader("📂 Subir archivo SemEval (CSV / TSV)", type=["csv","tsv"])
 
 if uploaded_file:
-    # Leer CSV o TSV
-    if uploaded_file.name.endswith(".tsv"):
-        df = pd.read_csv(uploaded_file, sep="\t")
-    else:
-        df = pd.read_csv(uploaded_file)
-
+    df = pd.read_csv(uploaded_file, sep="\t" if uploaded_file.name.endswith(".tsv") else ",")
     st.subheader("🧪 Vista previa")
     st.dataframe(df.head())
 
-    # Detectar columna de texto
-    text_col = None
-    for c in ["headline", "text", "sentence"]:
-        if c in df.columns:
-            text_col = c
-            break
-    if text_col is None:
-        text_col = df.columns[-1]
+    text_col = "headline" if "headline" in df.columns else df.columns[-1]
 
     total = len(df)
     st.write(f"📦 Total de registros: **{total}**")
@@ -109,17 +95,27 @@ if uploaded_file:
             end = min(start + BATCH, total)
             batch = df.iloc[start:end]
 
-            st.warning(f"🔍 Analizando filas {start+1} → {end} de {total}…")
+            st.warning(f"🔍 Analizando filas {start+1} a {end} de {total}…")
 
             texts = batch[text_col].astype(str).tolist()
-
             zsc = classifier(texts, candidate_labels=TOPICS)
 
             for i, row in enumerate(batch.itertuples()):
-                topic = zsc["labels"][i][0]
-                score = float(zsc["scores"][i][0])
+                # ===========================
+                # FIX SEGURO DEL TAMAÑO RESULTADO
+                # ===========================
+                try:
+                    if isinstance(zsc, list):
+                        topic = zsc[i]["labels"][0]
+                        score = float(zsc[i]["scores"][0])
+                    else:
+                        topic = zsc["labels"][i][0]
+                        score = float(zsc["scores"][i][0])
+                except Exception:
+                    topic = "desconocido"
+                    score = 0.0
 
-                # CHISTE EN ESPAÑOL
+                # CHISTE ESPAÑOL
                 prompt = f"Escribe un chiste muy corto y gracioso en español sobre '{topic}'."
                 joke = humor_model(prompt, max_length=60)[0]["generated_text"].strip()
 
