@@ -1,93 +1,127 @@
 import streamlit as st
 import pandas as pd
-from transformers import pipeline
 import time
+from langdetect import detect
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
 
-# ==============================
-# CREDITS & HEADER UI
-# ==============================
-st.markdown(
-    """
-    <h2 style='color:#00ff9f;'>[ ACCESS GRANTED ] :: Humor Topic Classifier :: Hacker Console</h2>
-    <p style='color:#00ffaa;'>Zero-shot BART :: Batch classification</p>
-    <p style='color:#0088ff; font-size:14px;'>Designed by Adolfo Camacho<br>
-    <a href='https://www.linkedin.com/in/adolfo-camacho-328a2a157' style='color:#00ffaa;'>LinkedIn</a> |
-    <a href='mailto:turboplay333@gmail.com' style='color:#00ffaa;'>turboplay333@gmail.com</a></p>
-    <hr>
-    """,
-    unsafe_allow_html=True
-)
+# =========================
+#        HACKER UI
+# =========================
+st.set_page_config(page_title="🕶️ Hacker Humor Classifier", layout="wide")
 
-# ==============================
-# LOAD MODEL
-# ==============================
+st.markdown("""
+<style>
+body {
+    background-color: black;
+    color: #00ff9f;
+    font-family: 'Courier New', monospace;
+}
+h1, h2, h3, h4 {
+    color: #00ff9f;
+    text-shadow: 0 0 10px #00ff9f;
+}
+.upload-box {
+    border: 2px dashed #00ff9f;
+    padding: 15px;
+    text-align: center;
+    background-color: #001a0f;
+}
+.footer {
+    text-align: center;
+    color: #00ffaa;
+    margin-top: 60px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# =========================
+#  Load Embedding model
+# =========================
 @st.cache_resource
-def load_classifier():
-    return pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+def load_embedder():
+    return SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-classifier = load_classifier()
+embedder = load_embedder()
 
-labels = ["noticias", "famosos", "política"]
 
-# ==============================
-# FILE UPLOAD
-# ==============================
-uploaded = st.file_uploader("📂 Sube archivo CSV/TSV con la columna 'text'", type=["csv", "tsv"])
+# =========================
+#   APP UI - HEADER
+# =========================
+st.markdown("<h1>[ ACCESS GRANTED ] Humor Topic Classifier :: Hacker Console</h1>", unsafe_allow_html=True)
+st.write("Zero-shot classifier :: Lightweight :: Batch Processing")
+
+# =========================
+#    FILE UPLOAD SECTION
+# =========================
+st.subheader("📥 Load CSV / TSV file")
+uploaded = st.file_uploader("⬇️ Upload your SemEval Task-A File", type=["csv", "tsv"])
 
 if uploaded:
-    df = pd.read_csv(uploaded, sep="," if uploaded.name.endswith("csv") else "\t")
 
-    if "text" not in df.columns:
-        st.error("❌ ERROR: No existe la columna 'text' en tu archivo.")
-        st.stop()
-
-    st.write("📊 Vista previa")
+    df = pd.read_csv(uploaded, sep="\t" if uploaded.name.endswith(".tsv") else ",")
     st.dataframe(df.head())
 
-    process_btn = st.button("🚀 Procesar")
+    if st.button("🚀 Start Batch Classification"):
 
-    if process_btn:
-        results = []
+        st.write("Detecting language and processing in batches of 30…")
+
+        topics = ["política", "famosos", "noticias"]
         batch_size = 30
-        total = len(df)
+        results = []
 
         progress = st.progress(0)
         status = st.empty()
 
-        for i in range(0, total, batch_size):
-            batch = df.iloc[i:i + batch_size]
+        for i in range(0, len(df), batch_size):
+            batch = df.iloc[i:i+batch_size]
+            texts = batch["headline"].tolist()
 
-            status.markdown(
-                f"🧪 Procesando lote {i//batch_size + 1} / {total//batch_size + 1}"
-            )
+            # embeddings
+            embeddings = embedder.encode(texts)
+            topic_vecs = embedder.encode(topics)
 
-            for idx, row in batch.iterrows():
-                text = str(row["text"])
+            sims = cosine_similarity(embeddings, topic_vecs)
 
-                out = classifier(text, labels, multi_label=False)
-
+            for j, text in enumerate(texts):
+                idx = i + j
+                topic_index = sims[j].argmax()
                 results.append({
-                    "id": row.get("id", idx),
+                    "id": batch["id"].iloc[j],
                     "text": text,
-                    "topic": out["labels"][0],
-                    "score": float(out["scores"][0])
+                    "topic": topics[topic_index],
+                    "score": float(sims[j][topic_index])
                 })
 
-            progress.progress(min((i + batch_size) / total, 1.0))
-            time.sleep(1)  # 🎬 Simulación animación hacker
+            progress.progress((i + batch_size) / len(df))
+            status.write(f"✔ Batch processed: {i+batch_size}/{len(df)}")
 
-            # Pregunta al usuario cada lote
-            if st.button(f"Continuar después del lote {i//batch_size + 1}?"):
-                pass
+            time.sleep(1)
+            if i + batch_size < len(df):
+                if st.checkbox(f"Continue after batch {i//batch_size + 1}?"):
+                    pass
+                else:
+                    break
 
-        output_df = pd.DataFrame(results)
-        st.success("🎯 Clasificación completada!")
-
-        st.dataframe(output_df.head(20))
+        st.success("🎯 Classification complete!")
+        results_df = pd.DataFrame(results)
+        st.dataframe(results_df.head())
 
         st.download_button(
-            "⬇️ Descargar resultados",
-            data=output_df.to_csv(index=False),
-            file_name="clasificados.csv",
-            mime="text/csv"
+            "📁 Download Results CSV",
+            data=results_df.to_csv(index=False),
+            file_name="classified_results.csv"
         )
+
+
+# =========================
+#        FOOTER
+# =========================
+st.markdown("""
+<div class="footer">
+👨‍💻 Designed by <b>Adolfo Camacho</b><br>
+🔗 <a href="https://www.linkedin.com/in/adolfo-camacho-328a2a157" style="color:#00ffaa">LinkedIn</a> |
+📧 turboplay333@gmail.com
+</div>
+""", unsafe_allow_html=True)
