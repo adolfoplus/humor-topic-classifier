@@ -36,11 +36,11 @@ if uploaded_files:
     df_all["text_clean"] = df_all["text_clean"].fillna("")
 
     if st.button("🔥 Clasificar temas"):
-        st.write("⚙️ Cargando modelo… Por favor espera…")
+        st.write("⚙️ Cargando modelo…")
 
         classifier = pipeline(
             "zero-shot-classification",
-            model="osama7/bert-base-multilingual-uncased-finetuned-xnli",
+            model="typeform/distilbert-base-multilingual-cased-mnli",
             device=0 if torch.cuda.is_available() else -1
         )
 
@@ -53,8 +53,7 @@ if uploaded_files:
         ]
 
         texts = df_all["text_clean"].tolist()
-        topics = []
-        scores = []
+        topics, scores = [], []
 
         batch_size = 8
         progress = st.progress(0)
@@ -66,11 +65,11 @@ if uploaded_files:
 
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i+batch_size]
+
             try:
                 results = classifier(
                     batch_texts,
-                    candidate_labels,
-                    hypothesis_template="Este texto es sobre {}."
+                    candidate_labels
                 )
                 for r in results:
                     topics.append(r["labels"][0])
@@ -82,13 +81,14 @@ if uploaded_files:
                                     index=False,
                                     encoding="utf-8-sig")
 
-                info.text(f"📁 Guardado: {len(topics)} clasificados")
+                info.text(f"📁 Progreso: {len(topics)}/{len(texts)} clasificados")
                 progress.progress(len(topics)/len(texts))
 
             except Exception as e:
                 st.error(f"❌ Error en batch {i}: {e}")
                 break
 
-        st.success("🎉 ¡Clasificación completada!")
+        st.success("🎉 ¡Clasificación completa!")
+
         with open(output_filename, "rb") as f:
             st.download_button("📥 Descargar CSV", f, file_name=output_filename)
