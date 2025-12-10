@@ -1,92 +1,83 @@
 import streamlit as st
 import pandas as pd
-import time
-from langdetect import detect
-from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
+from transformers import pipeline
 import matplotlib.pyplot as plt
 
-# =========================
-# App Config
-# =========================
-st.set_page_config(page_title="Humor Topic Classifier", layout="wide")
-st.title("🎯 Humor Topic Classifier")
+# ================================
+# 🔹 CONFIGURACIÓN DEL MODELO
+# ================================
+topics = [
+    "noticias", "deportes", "famosos", "politica", "tecnologia",
+    "economia", "ciencia", "salud", "entretenimiento", "medio ambiente"
+]
 
-st.write("Clasificación de titulares en 3 temas: **noticias**, **famosos** y **política**")
-st.write("Procesamiento en lotes de 100 ejemplos")
+classifier = pipeline(
+    "zero-shot-classification",
+    model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
 
-# =========================
-# Load Embedding model
-# =========================
-@st.cache_resource
-def load_embedder():
-    return SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-embedder = load_embedder()
+# ================================
+# 🔹 CLASIFICACIÓN POR LOTES
+# ================================
+def classify_batch(df):
+    texts = df["text"].tolist()
+    results = classifier(texts, candidate_labels=topics)
 
-# =========================
-# File Upload
-# =========================
-uploaded = st.file_uploader("📥 Cargar archivo CSV/TSV del Task-A", type=["csv", "tsv"])
+    df["topic"] = [res["labels"][0] for res in results]
+    df["score"] = [float(res["scores"][0]) for res in results]
 
-if uploaded:
-    df = pd.read_csv(uploaded, sep="\t" if uploaded.name.endswith(".tsv") else ",")
-    st.subheader("Vista previa del archivo")
-    st.dataframe(df.head(5))
+    return df
 
-    if st.button("🚀 Iniciar Clasificación"):
-        st.subheader("Procesamiento en curso...")
-        topics = ["política", "famosos", "noticias"]
-        topic_vectors = embedder.encode(topics)
 
-        batch_size = 100
-        results = []
+# ================================
+# 🔹 GRÁFICA POR BATCH
+# ================================
+def show_pie_chart(df, batch_index):
+    count_topics = df["topic"].value_counts()
 
-        progress = st.progress(0)
-        status = st.empty()
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.pie(count_topics, labels=count_topics.index, autopct="%1.1f%%")
+    ax.set_title(f"Distribución de temas - Lote {batch_index+1}")
+    st.pyplot(fig)
 
-        for i in range(0, len(df), batch_size):
-            batch = df.iloc[i:i+batch_size]
-            texts = batch["headline"].tolist()
 
-            embeddings = embedder.encode(texts)
-            sims = cosine_similarity(embeddings, topic_vectors)
+# ================================
+# 🔹 INTERFAZ STREAMLIT
+# ================================
+st.title("Clasificador de Temas por Bloques")
 
-            for j, _ in enumerate(texts):
-                topic_index = sims[j].argmax()
-                results.append({
-                    "id": batch["id"].iloc[j],
-                    "text": batch["headline"].iloc[j],
-                    "topic": topics[topic_index],
-                    "score": float(sims[j][topic_index])
-                })
+uploaded_file = st.file_uploader("📄 Sube tu archivo CSV", type=["csv"])
 
-            progress.progress(min((i+batch_size)/len(df), 1.0))
-            status.text(f"Procesados: {min(i+batch_size, len(df))}/{len(df)}")
-            time.sleep(0.5)
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
 
-        st.success("📌 Clasificación finalizada correctamente")
-        result_df = pd.DataFrame(results)
+    st.write("📌 Datos cargados:")
+    st.dataframe(df.head())
 
-        st.subheader("📊 Distribución de Temas")
-        counts = result_df["topic"].value_counts()
+    if st.button("🚀 Procesar en bloques de 100"):
+        processed = pd.DataFrame()
+        total_rows = len(df)
+        num_batches = total_rows // 100 + (1 if total_rows % 100 != 0 else 0)
 
-        fig, ax = plt.subplots()
-        ax.pie(counts, labels=counts.index, autopct="%1.1f%%", startangle=90)
-        ax.set_title("Distribución de temas en el dataset")
-        st.pyplot(fig)
+        for i in range(num_batches):
+            st.write(f"🔹 Procesando lote {i+1}/{num_batches}...")
+            batch_df = df.iloc[i*100:(i+1)*100].copy()
+            batch_df = classify_batch(batch_df)
+            processed = pd.concat([processed, batch_df])
 
-        st.subheader("📄 Resultados")
-        st.dataframe(result_df.head(10))
+            # Mostrar gráfica de cada lote
+            show_pie_chart(batch_df, i)
 
+            st.write(batch_df.head())
+
+        st.success("🎯 Clasificación completada de todos los lotes!")
+
+        # Botón para descargar resultados
+        csv_out = processed.to_csv(index=False).encode("utf-8")
         st.download_button(
-            "📁 Descargar resultados (CSV)",
-            data=result_df.to_csv(index=False),
-            file_name="resultados_clasificacion.csv"
+            label="⬇️ Descargar CSV Resultado",
+            data=csv_out,
+            file_name="clasificado.csv",
+            mime="text/csv"
         )
-
-# =========================
-# Footer
-# =========================
-st.markdown("<hr>", unsafe_allow_html=True)
-st.caption("Aplicación desarrollada por Adolfo Camacho — turboplay333@gmail.com")
