@@ -39,14 +39,15 @@ if uploaded_files:
         return ""
 
     df_all["text_clean"] = df_all.apply(clean_text, axis=1)
+    df_all["text_clean"] = df_all["text_clean"].fillna("")
 
     if st.button("🔥 Clasificar temas"):
-        st.write("⚙️ Preparando modelo...")
+        st.write("⚙️ Preparando modelo... Puede tardar unos minutos en la nube…")
 
-        # Modelo Zero-Shot Multilingüe
+        # Modelo Zero-Shot Multilingüe compatible con Streamlit Cloud
         classifier = pipeline(
             "zero-shot-classification",
-            model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli",
+            model="joeddav/xlm-roberta-large-xnli",
             device=0 if torch.cuda.is_available() else -1
         )
 
@@ -62,15 +63,15 @@ if uploaded_files:
         topics = []
         scores = []
 
-        batch_size = 8  # Ajustado para Streamlit Cloud (CPU)
+        batch_size = 8  # CPU-friendly para Streamlit Cloud
         progress_bar = st.progress(0)
         status = st.empty()
 
-        output_filename = "clasificacion_BERT_parcial.csv"
+        output_filename = "clasificacion_parcial.csv"
         cols = ["lang", "headline", "word1", "word2",
                 "text_clean", "topic_bert", "topic_score"]
 
-        st.write(f"🚀 Procesando {len(texts)} ejemplos por batches...\n")
+        st.write(f"🚀 Procesando {len(texts)} ejemplos por batches...")
 
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i+batch_size]
@@ -86,6 +87,7 @@ if uploaded_files:
                     topics.append(r["labels"][0])
                     scores.append(float(r["scores"][0]))
 
+                # Guardar progreso
                 df_all.loc[:len(topics)-1, "topic_bert"] = topics
                 df_all.loc[:len(scores)-1, "topic_score"] = scores
 
@@ -102,9 +104,10 @@ if uploaded_files:
 
         st.success("🎉 ¡Clasificación finalizada!")
 
+        # Descargar CSV
         with open(output_filename, "rb") as f:
             st.download_button(
-                label="📥 Descargar resultados (CSV)",
+                "📥 Descargar resultados en CSV",
                 data=f,
                 file_name=output_filename,
                 mime="text/csv"
