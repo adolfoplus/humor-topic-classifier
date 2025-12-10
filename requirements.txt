@@ -1,9 +1,11 @@
 streamlit
+transformers
+torch
 pandas
-langdetect
-sentence-transformers
-scikit-learn
 matplotlib
+sentence-transformers
+
+
 
 
 
