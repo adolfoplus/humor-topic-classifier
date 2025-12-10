@@ -2,89 +2,75 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from transformers import pipeline
+from collections import Counter
 
-# ============================
-#    Cargar modelo una vez
-# ============================
+# ======================
+# CARGA DEL MODELO
+# ======================
 @st.cache_resource
 def load_classifier():
     return pipeline(
         "zero-shot-classification",
-        model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual"  # ✔ Modelo estable
+        model="facebook/bart-large-mnli"
     )
 
-
 classifier = load_classifier()
-TOPICS = ["noticias", "política", "famosos"]
 
+# Temas a clasificar
+TOPICS = ["noticias", "política", "famosos", "deportes", "humor", "tecnología"]
 
-# ============================
-#        Interfaz
-# ============================
-st.title("🧠 Clasificador Temático de Titulares")
-st.write("Carga tu archivo y clasifica los titulares en tres temas: noticias, política o famosos.")
+# ======================
+# STREAMLIT UI
+# ======================
+st.title("📊 Clasificador de Temas")
+st.write("Procesa textos en lotes de 100 y muestra una gráfica de pastel.")
 
-uploaded = st.file_uploader("📄 Subir archivo CSV/TSV", type=["csv", "tsv"])
+file = st.file_uploader("📥 Sube un archivo .tsv o .csv", type=["csv", "tsv"])
 
-if uploaded is not None:
-    # Leer CSV o TSV
-    if uploaded.name.endswith(".tsv"):
-        df = pd.read_csv(uploaded, sep="\t", on_bad_lines="skip")
-    else:
-        df = pd.read_csv(uploaded, on_bad_lines="skip")
+if file:
+    sep = "\t" if file.name.endswith(".tsv") else ","
+    df = pd.read_csv(file, sep=sep)
 
     if "text" not in df.columns:
-        st.error("❌ El archivo debe contener una columna llamada **text**.")
+        st.error("El archivo debe tener una columna llamada 'text'")
         st.stop()
 
-    st.write("📌 Vista previa de tus datos:")
-    st.dataframe(df.head())
+    texts = df["text"].tolist()
+    total = len(texts)
 
-    if st.button("🚀 Clasificar titulares"):
-        batch_size = 100
-        total = len(df)
-        st.info(f"Procesando {total} textos…")
-        progress = st.progress(0)
+    batch_size = 100
+    results = []
 
-        topics = []
-        scores = []
+    progress_bar = st.progress(0)
 
-        for i in range(0, total, batch_size):
-            batch = df["text"][i:i+batch_size].tolist()
+    for i in range(0, total, batch_size):
+        batch = texts[i:i+batch_size]
+        output = classifier(batch, TOPICS, multi_label=False)
 
-            for text in batch:
-                try:
-                    res = classifier(text, TOPICS)
-                    topics.append(res["labels"][0])
-                    scores.append(float(res["scores"][0]))
-                except Exception:
-                    topics.append("desconocido")
-                    scores.append(0.0)
+        for o in output:
+            topic = o["labels"][0] if o["labels"] else "otros"
+            results.append(topic)
 
-            progress.progress(min(1.0, (i + batch_size) / total))
+        progress_bar.progress(min((i+batch_size)/total, 1.0))
 
-        df["topic"] = topics
-        df["score"] = scores
+    df["topic"] = results
 
-        st.success("🎯 Clasificación completada")
+    st.success("¡Clasificación completada!")
+    st.dataframe(df.head(20))
 
-        # ============================
-        #       Gráfica de pastel
-        # ============================
-        st.subheader("📊 Distribución de temas")
-        topic_counts = df["topic"].value_counts()
-        fig, ax = plt.subplots()
-        ax.pie(topic_counts, labels=topic_counts.index, autopct='%1.1f%%', startangle=90)
-        ax.axis('equal')
-        st.pyplot(fig)
+    # 📊 Conteo por tema
+    counts = Counter(results)
+    st.subheader("Distribución de temas")
 
-        # ============================
-        #    Botón de descarga
-        # ============================
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "💾 Descargar CSV con resultados",
-            csv,
-            file_name="clasificacion_tematicas.csv",
-            mime="text/csv"
-        )
+    fig, ax = plt.subplots()
+    ax.pie(counts.values(), labels=counts.keys(), autopct="%1.1f%%", startangle=90)
+    ax.axis("equal")
+    st.pyplot(fig)
+
+    # Descargar resultado
+    st.download_button(
+        "📎 Descargar resultados",
+        df.to_csv(index=False),
+        "resultados.csv",
+        "text/csv"
+    )
