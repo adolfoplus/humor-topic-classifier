@@ -1,83 +1,101 @@
 import streamlit as st
 import pandas as pd
-from transformers import pipeline
 import matplotlib.pyplot as plt
+from transformers import pipeline
+from langdetect import detect
 
-# ================================
-# 🔹 CONFIGURACIÓN DEL MODELO
-# ================================
-topics = [
-    "noticias", "deportes", "famosos", "politica", "tecnologia",
-    "economia", "ciencia", "salud", "entretenimiento", "medio ambiente"
-]
+# =====================================================
+#          CARGA DEL MODELO DE CLASIFICACIÓN
+# =====================================================
+@st.cache_resource
+def load_classifier():
+    return pipeline(
+        "zero-shot-classification",
+        model="Recognai/bert-base-multilingual-uncased"
+    )
 
-classifier = pipeline(
-    "zero-shot-classification",
-    model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-)
+classifier = load_classifier()
 
-
-# ================================
-# 🔹 CLASIFICACIÓN POR LOTES
-# ================================
-def classify_batch(df):
-    texts = df["text"].tolist()
-    results = classifier(texts, candidate_labels=topics)
-
-    df["topic"] = [res["labels"][0] for res in results]
-    df["score"] = [float(res["scores"][0]) for res in results]
-
-    return df
+# Temas a clasificar
+TOPICS = ["noticias", "política", "famosos"]
 
 
-# ================================
-# 🔹 GRÁFICA POR BATCH
-# ================================
-def show_pie_chart(df, batch_index):
-    count_topics = df["topic"].value_counts()
+# =====================================================
+#                INTERFAZ DE LA APP
+# =====================================================
+st.title("🧠 Clasificador de Temas (Batch 100)")
+st.markdown("Clasifica textos en **noticias**, **política** y **famosos** por lotes de 100.")
 
-    fig, ax = plt.subplots(figsize=(5, 5))
-    ax.pie(count_topics, labels=count_topics.index, autopct="%1.1f%%")
-    ax.set_title(f"Distribución de temas - Lote {batch_index+1}")
-    st.pyplot(fig)
-
-
-# ================================
-# 🔹 INTERFAZ STREAMLIT
-# ================================
-st.title("Clasificador de Temas por Bloques")
-
-uploaded_file = st.file_uploader("📄 Sube tu archivo CSV", type=["csv"])
+uploaded_file = st.file_uploader("📄 Sube tu archivo CSV o TSV", type=["csv", "tsv"])
 
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    # Detectar separador según extensión
+    if uploaded_file.name.endswith(".tsv"):
+        df = pd.read_csv(uploaded_file, sep="\t")
+    else:
+        df = pd.read_csv(uploaded_file)
 
-    st.write("📌 Datos cargados:")
-    st.dataframe(df.head())
+    if "text" not in df.columns:
+        st.error("❌ El archivo debe contener una columna llamada **text**")
+        st.stop()
 
-    if st.button("🚀 Procesar en bloques de 100"):
-        processed = pd.DataFrame()
-        total_rows = len(df)
-        num_batches = total_rows // 100 + (1 if total_rows % 100 != 0 else 0)
+    st.success("📂 Archivo cargado correctamente")
+    st.write(df.head())
 
-        for i in range(num_batches):
-            st.write(f"🔹 Procesando lote {i+1}/{num_batches}...")
-            batch_df = df.iloc[i*100:(i+1)*100].copy()
-            batch_df = classify_batch(batch_df)
-            processed = pd.concat([processed, batch_df])
+    process_btn = st.button("🚀 Procesar clasificación")
+    if process_btn:
+        st.info("⏳ Procesando textos…")  
 
-            # Mostrar gráfica de cada lote
-            show_pie_chart(batch_df, i)
+        results = []
+        batch_size = 100
 
-            st.write(batch_df.head())
+        progress = st.progress(0)
+        total = len(df)
 
-        st.success("🎯 Clasificación completada de todos los lotes!")
+        # Procesar por bloques de 100
+        for i in range(0, total, batch_size):
+            batch = df["text"][i:i + batch_size].tolist()
+            detected_batch = []
 
-        # Botón para descargar resultados
-        csv_out = processed.to_csv(index=False).encode("utf-8")
+            for text in batch:
+                try:
+                    lang = detect(text)
+                    if lang not in ["en", "es"]:
+                        detected_batch.append(("otro", 0))
+                        continue
+                except:
+                    detected_batch.append(("otro", 0))
+                    continue
+
+                zsc = classifier(text, TOPICS)
+                topic = zsc["labels"][0]
+                score = float(zsc["scores"][0])
+                detected_batch.append((topic, score))
+
+            results.extend(detected_batch)
+
+            progress.progress(min(1.0, (i + batch_size) / total))
+
+        df["topic"] = [r[0] for r in results]
+        df["score"] = [r[1] for r in results]
+
+        st.success("✨ Clasificación completada")
+
+        # =============================
+        #    GRÁFICA DE PASTEL
+        # =============================
+        st.subheader("📊 Distribución de temas")
+        counts = df["topic"].value_counts()
+        fig, ax = plt.subplots()
+        ax.pie(counts, labels=counts.index, autopct="%1.1f%%", startangle=90)
+        ax.axis("equal")
+        st.pyplot(fig)
+
+        # Descargar resultados
+        csv_out = df.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="⬇️ Descargar CSV Resultado",
+            "💾 Descargar resultados",
             data=csv_out,
-            file_name="clasificado.csv",
+            file_name="resultados_clasificados.csv",
             mime="text/csv"
         )
