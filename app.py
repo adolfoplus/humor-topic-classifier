@@ -1,114 +1,111 @@
-############################################
-# HUMOR TOPIC CLASSIFIER - STREAMLIT APP
-############################################
-
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from tqdm.auto import tqdm
 import torch
 from transformers import pipeline
+from tqdm.auto import tqdm
 
 st.set_page_config(page_title="Clasificador de Humor", layout="wide")
-st.title("😄 Clasificador de Temas para Task-A (Multilingüe)")
+st.title("😄 Clasificador de Temas para Task-A (Zero-Shot + Batches)")
 
-st.write("Zero-shot + humor con estilo mexicano 🇲🇽 (ligero y divertido)")
-st.write("Sube tu archivo **TSV** del Task-A 👉 encabezado: `id, word1, word2, headline`")
+# =============================
+# Subida de archivos
+# =============================
+uploaded_files = st.file_uploader(
+    "📂 Sube tus archivos Task-A (.tsv)",
+    type=["tsv"],
+    accept_multiple_files=True
+)
 
-############################################
-# 1️⃣ Subir archivo
-############################################
-uploaded_file = st.file_uploader("📂 Sube tu archivo TSV aquí", type=["tsv"])
+if uploaded_files:
+    dfs = {}
+    for file in uploaded_files:
+        lang = file.name.split("-")[-1].split(".")[0]
+        df = pd.read_csv(file, sep="\t")
+        df["lang"] = lang
+        dfs[lang] = df
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file, sep="\t")
-    st.subheader("👀 Vista previa del archivo")
-    st.dataframe(df.head())
+    df_all = pd.concat(dfs.values(), ignore_index=True)
+    st.write("📊 Total de filas:", len(df_all))
+    st.dataframe(df_all.head())
 
-############################################
-# 2️⃣ Cargar el clasificador (con caché)
-############################################
-@st.cache_resource
-def load_classifier():
-    st.write("🤖 Cargando modelo multilingüe Zero-Shot...")
-    return pipeline(
-        "zero-shot-classification",
-        model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli",
-        device=0 if torch.cuda.is_available() else -1
-    )
-
-############################################
-# 3️⃣ Clasificar cuando se presione el botón
-############################################
-if uploaded_file and st.button("🔥 Clasificar temas"):
-    classifier = load_classifier()
-
-    # Construir columna de texto limpio
+    # =============================
+    # Texto limpio
+    # =============================
     def clean_text(row):
         if isinstance(row.get("headline"), str) and row["headline"].strip() != "":
-            return row["headline"]
+            return row["headline"].strip()
         if "word1" in row and "word2" in row:
             return f"{str(row['word1']).strip()} {str(row['word2']).strip()}"
         return ""
 
-    df["text_clean"] = df.apply(clean_text, axis=1)
+    df_all["text_clean"] = df_all.apply(clean_text, axis=1)
 
-    # Temas
-    candidate_labels = [
-        "política", "celebridades", "tecnología", "animales",
-        "comida", "deportes", "sexo", "crimen",
-        "religión", "salud", "trabajo", "dinero",
-        "educación", "familia", "medio ambiente",
-        "ciencia", "música", "cine", "internet", "militar"
-    ]
+    if st.button("🔥 Clasificar temas"):
+        st.write("⚙️ Preparando modelo...")
 
-    texts = df["text_clean"].tolist()
-    topics = []
-    scores = []
-
-    progress_bar = st.progress(0)
-    total = len(texts)
-
-    st.write(f"⚙️ Procesando {total} ejemplos...")
-
-    for i, text in enumerate(texts):
-        result = classifier(
-            text,
-            candidate_labels,
-            hypothesis_template="Este texto es sobre {}."
+        # Modelo Zero-Shot Multilingüe
+        classifier = pipeline(
+            "zero-shot-classification",
+            model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli",
+            device=0 if torch.cuda.is_available() else -1
         )
-        topics.append(result["labels"][0])
-        scores.append(float(result["scores"][0]))
 
-        progress_bar.progress((i+1)/total)
+        candidate_labels = [
+            "política", "celebridades", "tecnología", "animales",
+            "comida", "deportes", "sexo", "crimen",
+            "religión", "salud", "trabajo", "dinero",
+            "educación", "familia", "medio ambiente",
+            "ciencia", "música", "cine", "internet", "militar"
+        ]
 
-    df["topic_bert"] = topics
-    df["topic_score"] = scores
+        texts = df_all["text_clean"].tolist()
+        topics = []
+        scores = []
 
-    st.success("🎉 ¡Clasificación completa!")
+        batch_size = 8  # Ajustado para Streamlit Cloud (CPU)
+        progress_bar = st.progress(0)
+        status = st.empty()
 
-    ############################################
-    # 4️⃣ Estadísticas y gráficas
-    ############################################
-    st.subheader("📊 Estadísticas del Corpus")
+        output_filename = "clasificacion_BERT_parcial.csv"
+        cols = ["lang", "headline", "word1", "word2",
+                "text_clean", "topic_bert", "topic_score"]
 
-    fig, ax = plt.subplots(figsize=(10,6))
-    sns.countplot(data=df, y="topic_bert", order=df["topic_bert"].value_counts().index)
-    plt.title("Distribución de Temas Detectados")
-    plt.xlabel("Cantidad")
-    plt.ylabel("Tema")
-    st.pyplot(fig)
+        st.write(f"🚀 Procesando {len(texts)} ejemplos por batches...\n")
 
-    ############################################
-    # 5️⃣ Descargar resultado
-    ############################################
-    output_name = "clasificacion_humor_completa.csv"
-    csv = df.to_csv(index=False, encoding="utf-8-sig")
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i+batch_size]
 
-    st.download_button(
-        label="📥 Descargar resultados en CSV",
-        data=csv,
-        file_name=output_name,
-        mime="text/csv"
-    )
+            try:
+                results = classifier(
+                    batch_texts,
+                    candidate_labels,
+                    hypothesis_template="Este texto es sobre {}."
+                )
+
+                for r in results:
+                    topics.append(r["labels"][0])
+                    scores.append(float(r["scores"][0]))
+
+                df_all.loc[:len(topics)-1, "topic_bert"] = topics
+                df_all.loc[:len(scores)-1, "topic_score"] = scores
+
+                df_all[cols].to_csv(output_filename,
+                                    index=False,
+                                    encoding="utf-8-sig")
+
+                status.text(f"📁 Guardado parcial: {len(topics)} filas")
+                progress_bar.progress(min(1, len(topics)/len(texts)))
+
+            except Exception as e:
+                st.error(f"❌ Error en batch {i}: {e}")
+                break
+
+        st.success("🎉 ¡Clasificación finalizada!")
+
+        with open(output_filename, "rb") as f:
+            st.download_button(
+                label="📥 Descargar resultados (CSV)",
+                data=f,
+                file_name=output_filename,
+                mime="text/csv"
+            )
