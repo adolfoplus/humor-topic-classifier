@@ -10,7 +10,7 @@ from transformers import pipeline
 def load_classifier():
     return pipeline(
         "zero-shot-classification",
-        model="Recognai/bert-base-multilingual-uncased"
+        model="joeddav/xlm-roberta-large-xnli"     # ✔ Modelo ligero
     )
 
 classifier = load_classifier()
@@ -23,47 +23,47 @@ TOPICS = ["noticias", "política", "famosos"]
 #                INTERFAZ DE LA APP
 # =====================================================
 st.title("🧠 Clasificador de Temas (Batch 100)")
-st.markdown("Clasifica textos en **noticias**, **política** y **famosos** por lotes de 100.")
+st.markdown("Clasifica textos en **noticias**, **política** y **famosos** por bloques de 100.")
 
 uploaded_file = st.file_uploader("📄 Sube tu archivo CSV o TSV", type=["csv", "tsv"])
 
 if uploaded_file is not None:
 
-    # Detecta automáticamente CSV o TSV
+    # 📌 Auto–detección CSV/TSV
     if uploaded_file.name.endswith(".tsv"):
         df = pd.read_csv(uploaded_file, sep="\t", on_bad_lines="skip")
     else:
         df = pd.read_csv(uploaded_file, on_bad_lines="skip")
 
     if "text" not in df.columns:
-        st.error("❌ El archivo debe contener una columna llamada **text**")
+        st.error("❌ El archivo debe tener una columna llamada **text**")
         st.stop()
 
     st.success("📂 Archivo cargado correctamente")
     st.write(df.head())
 
     if st.button("🚀 Procesar clasificación"):
-        st.info("⏳ Procesando textos…")  
+        st.info("⏳ Procesando textos, por favor espere…")
 
-        results = []
+        results_topic = []
+        results_score = []
         batch_size = 100
         total = len(df)
         progress = st.progress(0)
 
-        # Procesar por bloques de 100
+        # Clasificación por bloques de 100
         for i in range(0, total, batch_size):
             batch = df["text"][i:i+batch_size].tolist()
 
             for text in batch:
                 zsc = classifier(text, TOPICS)
-                topic = zsc["labels"][0]
-                score = float(zsc["scores"][0])
-                results.append((topic, score))
+                results_topic.append(zsc["labels"][0])
+                results_score.append(float(zsc["scores"][0]))
 
-            progress.progress(min(1, (i+batch_size)/total))
+            progress.progress(min(1, (i + batch_size) / total))
 
-        df["topic"] = [r[0] for r in results]
-        df["score"] = [r[1] for r in results]
+        df["topic"] = results_topic
+        df["score"] = results_score
 
         st.success("✨ Clasificación completada")
 
@@ -77,7 +77,7 @@ if uploaded_file is not None:
         ax.axis("equal")
         st.pyplot(fig)
 
-        # Descargar resultados
+        # Descarga del CSV final
         csv_out = df.to_csv(index=False).encode("utf-8")
         st.download_button(
             "💾 Descargar resultados",
