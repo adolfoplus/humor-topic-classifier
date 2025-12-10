@@ -1,8 +1,12 @@
-streamlit
-transformers
-pandas
+streamlit==1.37.0
+transformers==4.46.3
 torch
+pandas
 tqdm
+matplotlib
+seaborn
+
+
 
 
 
