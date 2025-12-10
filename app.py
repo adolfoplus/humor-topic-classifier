@@ -24,7 +24,7 @@ input, textarea, .stTextInput, .stFileUploader {
     color: #00FF00 !important;
     border: 1px solid #00FF00 !important;
 }
-div.stButton > button {
+div.stButton > button, .stDownloadButton button {
     background-color: #003300 !important;
     color: #00FF00 !important;
     border: 1px solid #00FF00;
@@ -41,18 +41,35 @@ table, th, td {
 svg {
     background-color: #000000 !important;
 }
-footer, .stFooter {
-    color: #00FF00 !important;
-}
 </style>
 """
 st.markdown(terminal_style, unsafe_allow_html=True)
 
 # ================================
-# TITLE
+# TITLE & INFO BOX
 # ================================
 st.title("😄 Humor Topic Classifier — Task-A Zero-Shot")
 
+st.markdown("""
+📌 **¿Qué hace este modelo?**
+
+Esta app clasifica titulares/juegos de palabras del Task-A  
+directamente en **temas semánticos**, sin haber visto antes tus datos:
+
+🔹 Modelo usado: **facebook/bart-large-mnli**  
+🔹 Técnica: **Zero-Shot Classification**  
+🔹 Optimizado para titulares cortos  
+🔹 Funciona en EN / ES / ZH sin cambiar el modelo  
+🔹 Procesa por **batches** y **guarda progreso parcial**
+
+> Puedes descargar el resultado **aunque siga corriendo** ⚡
+""")
+
+st.divider()
+
+# ================================
+# UPLOAD
+# ================================
 uploaded_files = st.file_uploader(
     "📂 Carga tus archivos (.tsv)",
     type=["tsv"],
@@ -60,7 +77,7 @@ uploaded_files = st.file_uploader(
 )
 
 if not uploaded_files:
-    st.info("👆 Carga tus datasets para comenzar")
+    st.info("👆 Sube tus archivos para comenzar")
     st.stop()
 
 # ================================
@@ -88,7 +105,7 @@ df_all["text_clean"] = df_all.apply(clean_text, axis=1).fillna("")
 # ================================
 # MODEL LOADING
 # ================================
-st.warning("⚙️ Cargando modelo...")
+st.warning("⚙️ Cargando modelo Zero-Shot...")
 
 classifier = pipeline(
     "zero-shot-classification",
@@ -107,8 +124,10 @@ candidate_labels = [
 texts = df_all["text_clean"].tolist()
 batch_size = 8
 topics, scores = [], []
+
 output_filename = "clasificacion_BERT_parcial.csv"
-cols = ["lang", "headline", "word1", "word2", "text_clean", "topic_bert", "topic_score"]
+cols = ["lang", "headline", "word1", "word2",
+        "text_clean", "topic_bert", "topic_score"]
 
 progress_bar = st.progress(0)
 status_text = st.empty()
@@ -122,11 +141,14 @@ download_placeholder = st.empty()
 def draw_charts(df):
     fig, axs = plt.subplots(1, 2, figsize=(14, 5))
     try:
-        df["topic_bert"].value_counts().plot.barh(ax=axs[0], title="📌 Distribución por Tema", color="#00FF00")
+        df["topic_bert"].value_counts().plot.barh(
+            ax=axs[0], title="📌 Distribución por Tema", color="#00FF00"
+        )
         df.groupby("topic_bert")["topic_score"].mean().sort_values().plot.barh(
             ax=axs[1], title="📈 Score Promedio", color="#00FF00"
         )
-    except: pass
+    except:
+        pass
     plt.tight_layout()
     return fig
 
@@ -152,7 +174,7 @@ for i in range(0, len(texts), batch_size):
     df_all[cols].to_csv(output_filename, index=False, encoding="utf-8-sig")
 
     progress_bar.progress(len(topics)/len(texts))
-    status_text.write(f"> Procesadas: {len(topics)}/{len(texts)}")
+    status_text.write(f"> Procesadas: {len(topics)} / {len(texts)}")
     chart_placeholder.pyplot(draw_charts(df_all))
     table_placeholder.dataframe(df_all.head(10))
 
@@ -162,13 +184,23 @@ for i in range(0, len(texts), batch_size):
 st.balloons()
 st.success("✔ Clasificación Finalizada")
 
-download_placeholder.download_button(
-    label="⬇ Descargar Resultados",
-    data=open(output_filename, "rb"),
-    file_name="clasificacion_BERT_parcial.csv",
-    mime="text/csv",
-    key="download_partial"
-)
+with open(output_filename, "rb") as f:
+    download_placeholder.download_button(
+        label="⬇ Descargar Resultados",
+        data=f.read(),
+        file_name="clasificacion_BERT_parcial.csv",
+        mime="text/csv",
+        key="download_partial"
+    )
 
 chart_placeholder.pyplot(draw_charts(df_all))
 table_placeholder.dataframe(df_all.head(20))
+
+# ================================
+# FOOTER — BRANDING
+# ================================
+st.markdown("---")
+st.markdown("""
+👨‍💻 Designed by **Adolfo**  
+🔗 [LinkedIn — Adolfo Camacho](https://www.linkedin.com/in/adolfocamacho/)
+""")
