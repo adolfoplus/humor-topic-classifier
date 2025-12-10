@@ -7,9 +7,6 @@ from tqdm.auto import tqdm
 st.set_page_config(page_title="Clasificador de Humor", layout="wide")
 st.title("😄 Clasificador de Temas para Task-A (Zero-Shot + Batches)")
 
-# =============================
-# Subida de archivos
-# =============================
 uploaded_files = st.file_uploader(
     "📂 Sube tus archivos Task-A (.tsv)",
     type=["tsv"],
@@ -28,9 +25,6 @@ if uploaded_files:
     st.write("📊 Total de filas:", len(df_all))
     st.dataframe(df_all.head())
 
-    # =============================
-    # Texto limpio
-    # =============================
     def clean_text(row):
         if isinstance(row.get("headline"), str) and row["headline"].strip() != "":
             return row["headline"].strip()
@@ -42,12 +36,11 @@ if uploaded_files:
     df_all["text_clean"] = df_all["text_clean"].fillna("")
 
     if st.button("🔥 Clasificar temas"):
-        st.write("⚙️ Preparando modelo... Puede tardar unos minutos en la nube…")
+        st.write("⚙️ Cargando modelo… Por favor espera…")
 
-        # Modelo Zero-Shot Multilingüe compatible con Streamlit Cloud
         classifier = pipeline(
             "zero-shot-classification",
-            model="joeddav/xlm-roberta-large-xnli",
+            model="osama7/bert-base-multilingual-uncased-finetuned-xnli",
             device=0 if torch.cuda.is_available() else -1
         )
 
@@ -63,52 +56,39 @@ if uploaded_files:
         topics = []
         scores = []
 
-        batch_size = 8  # CPU-friendly para Streamlit Cloud
-        progress_bar = st.progress(0)
-        status = st.empty()
+        batch_size = 8
+        progress = st.progress(0)
+        info = st.empty()
 
         output_filename = "clasificacion_parcial.csv"
         cols = ["lang", "headline", "word1", "word2",
                 "text_clean", "topic_bert", "topic_score"]
 
-        st.write(f"🚀 Procesando {len(texts)} ejemplos por batches...")
-
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i+batch_size]
-
             try:
                 results = classifier(
                     batch_texts,
                     candidate_labels,
                     hypothesis_template="Este texto es sobre {}."
                 )
-
                 for r in results:
                     topics.append(r["labels"][0])
                     scores.append(float(r["scores"][0]))
 
-                # Guardar progreso
                 df_all.loc[:len(topics)-1, "topic_bert"] = topics
                 df_all.loc[:len(scores)-1, "topic_score"] = scores
-
                 df_all[cols].to_csv(output_filename,
                                     index=False,
                                     encoding="utf-8-sig")
 
-                status.text(f"📁 Guardado parcial: {len(topics)} filas")
-                progress_bar.progress(min(1, len(topics)/len(texts)))
+                info.text(f"📁 Guardado: {len(topics)} clasificados")
+                progress.progress(len(topics)/len(texts))
 
             except Exception as e:
                 st.error(f"❌ Error en batch {i}: {e}")
                 break
 
-        st.success("🎉 ¡Clasificación finalizada!")
-
-        # Descargar CSV
+        st.success("🎉 ¡Clasificación completada!")
         with open(output_filename, "rb") as f:
-            st.download_button(
-                "📥 Descargar resultados en CSV",
-                data=f,
-                file_name=output_filename,
-                mime="text/csv"
-            )
+            st.download_button("📥 Descargar CSV", f, file_name=output_filename)
