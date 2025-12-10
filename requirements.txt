@@ -1,9 +1,12 @@
-streamlit
-transformers
-torch
-pandas
-matplotlib
-sentence-transformers
+langdetect==1.0.9
+matplotlib==3.10.7
+transformers==4.57.3
+sentence-transformers==5.1.2
+scikit-learn==1.7.2
+pandas==2.3.3
+streamlit==1.52.1
+
+
 
 
 
