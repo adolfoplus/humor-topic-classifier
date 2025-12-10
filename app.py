@@ -1,79 +1,91 @@
 import streamlit as st
 import pandas as pd
 from transformers import pipeline
-from collections import Counter
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Clasificador de Temas", layout="wide")
-
-st.title("📌 Clasificación de Temas")
-
+# =========================
+# Modelo Zero-Shot
+# =========================
 @st.cache_resource
 def load_classifier():
     return pipeline(
         "zero-shot-classification",
-        model="typeform/distilbert-base-uncased-mnli-pruned",
-        use_fast=False  # 🔥 Solución clave para evitar el error
+        model="joeddav/xlm-roberta-large-xnli"
     )
 
 classifier = load_classifier()
 
-st.subheader("📤 Sube tu archivo CSV o TSV")
-file = st.file_uploader("Carga un archivo", type=["csv", "tsv"])
+TOPICS = ["noticias", "política", "famosos"]
 
-if file:
-    # Detectar delimitador
-    delimiter = "\t" if file.name.endswith(".tsv") else ","
-    df = pd.read_csv(file, delimiter=delimiter)
 
-    st.write("📄 Vista previa del archivo:")
-    st.dataframe(df.head())
+# =========================
+# Función de clasificación
+# =========================
+def classify_batch(texts):
+    preds = []
+    for t in texts:
+        try:
+            result = classifier(t, TOPICS)
+            preds.append(result["labels"][0])
+        except:
+            preds.append("error")
+    return preds
 
-    # 🔍 Detectar columna de texto
-    text_col = None
-    columnas_ignorar = {"id", "word1", "word2", "topic", "score", "joke"}
 
-    for col in df.columns:
-        if col.lower() == "text":
-            text_col = col
-            break
-        if col.lower() not in columnas_ignorar:
-            text_col = col
-            break
+# =========================
+# UI Streamlit
+# =========================
+st.title("Clasificador de Temas (Humor Task)")
+st.write("📌 Procesa cada 100 ejemplos y muestra una gráfica por lote.")
 
-    if text_col is None:
-        st.error("⚠ No se encontró una columna de texto.")
+
+uploaded = st.file_uploader("Sube tu archivo .tsv", type=["tsv"])
+
+if uploaded is not None:
+    df = pd.read_csv(uploaded, sep="\t")
+
+    # 🔴 Validación correcta
+    if "headline" not in df.columns:
+        st.error("El archivo debe tener una columna llamada 'headline'")
         st.stop()
 
-    st.success(f"🧠 Columna de texto detectada: **{text_col}**")
+    texts = df["headline"].fillna("").tolist()
 
-    texts = df[text_col].astype(str).tolist()
+    st.success("Archivo correcto ✔️ ¡Listo para clasificar!")
 
-    labels = ["noticias", "politica", "famosos"]
+    results = []
+    batch_size = 100
 
-    resultados = []
-    total = len(texts)
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        st.write(f"👉 Clasificando lote {i} – {i+len(batch)}...")
 
-    with st.spinner("🔎 Clasificando..."):
-        for i in range(0, total, 100):
-            batch = texts[i:i + 100]
-            zsc = classifier(batch, labels)
-            for r in zsc:
-                resultados.append(r["labels"][0])
+        batch_preds = classify_batch(batch)
+        results.extend(batch_preds)
 
-    df["pred_topic"] = resultados
+        batch_df = pd.DataFrame({"headline": batch, "topic": batch_preds})
 
-    st.subheader("📊 Distribución de temas")
-    conteo = Counter(resultados)
-    fig, ax = plt.subplots()
-    ax.pie(conteo.values(), labels=conteo.keys(), autopct="%1.1f%%")
-    st.pyplot(fig)
+        st.write(batch_df.sample(min(5, len(batch_df))))
 
-    st.subheader("📥 Resultado")
-    st.dataframe(df.head())
+        # =========================
+        # Gráfica de pastel
+        # =========================
+        counts = batch_df["topic"].value_counts()
+
+        fig, ax = plt.subplots()
+        counts.plot(kind="pie", autopct='%1.1f%%', startangle=90, ax=ax)
+        ax.set_ylabel("")
+        ax.set_title(f"Distribución de temas en lote {i}")
+        st.pyplot(fig)
+
+    # Se muestran TODOS los resultados al final
+    df["topic"] = results
+    st.write("📊 Resultados completos:")
+    st.dataframe(df)
+
     st.download_button(
-        "⬇ Descargar CSV",
-        df.to_csv(index=False),
-        "temas_clasificados.csv",
+        "📥 Descargar resultados",
+        df.to_csv(index=False).encode("utf-8"),
+        "resultados_clasificados.csv",
         "text/csv"
     )
