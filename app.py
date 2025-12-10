@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from transformers import pipeline
-from langdetect import detect
 
 # =====================================================
 #          CARGA DEL MODELO DE CLASIFICACIÓN
@@ -29,11 +28,12 @@ st.markdown("Clasifica textos en **noticias**, **política** y **famosos** por l
 uploaded_file = st.file_uploader("📄 Sube tu archivo CSV o TSV", type=["csv", "tsv"])
 
 if uploaded_file is not None:
-    # Detectar separador según extensión
+
+    # Detecta automáticamente CSV o TSV
     if uploaded_file.name.endswith(".tsv"):
-        df = pd.read_csv(uploaded_file, sep="\t")
+        df = pd.read_csv(uploaded_file, sep="\t", on_bad_lines="skip")
     else:
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(uploaded_file, on_bad_lines="skip")
 
     if "text" not in df.columns:
         st.error("❌ El archivo debe contener una columna llamada **text**")
@@ -42,39 +42,25 @@ if uploaded_file is not None:
     st.success("📂 Archivo cargado correctamente")
     st.write(df.head())
 
-    process_btn = st.button("🚀 Procesar clasificación")
-    if process_btn:
+    if st.button("🚀 Procesar clasificación"):
         st.info("⏳ Procesando textos…")  
 
         results = []
         batch_size = 100
-
-        progress = st.progress(0)
         total = len(df)
+        progress = st.progress(0)
 
         # Procesar por bloques de 100
         for i in range(0, total, batch_size):
-            batch = df["text"][i:i + batch_size].tolist()
-            detected_batch = []
+            batch = df["text"][i:i+batch_size].tolist()
 
             for text in batch:
-                try:
-                    lang = detect(text)
-                    if lang not in ["en", "es"]:
-                        detected_batch.append(("otro", 0))
-                        continue
-                except:
-                    detected_batch.append(("otro", 0))
-                    continue
-
                 zsc = classifier(text, TOPICS)
                 topic = zsc["labels"][0]
                 score = float(zsc["scores"][0])
-                detected_batch.append((topic, score))
+                results.append((topic, score))
 
-            results.extend(detected_batch)
-
-            progress.progress(min(1.0, (i + batch_size) / total))
+            progress.progress(min(1, (i+batch_size)/total))
 
         df["topic"] = [r[0] for r in results]
         df["score"] = [r[1] for r in results]
